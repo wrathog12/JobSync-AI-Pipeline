@@ -12,7 +12,7 @@ Review of `Context.md` (the job-application Chrome Extension ideation) **plus th
 
 ## 0. Executive Verdict
 
-| Dimension | Rev 1 | **Rev 2** | Why it moved |
+| Dimension | Rev 1 | **Rev 2** | Why it moved ||| deserve changes
 |---|---|---|---|
 | Layer decoupling | 8/10 | **8/10** | Unchanged. Still correct. |
 | DOM acquisition | 7/10 | **7/10** | Unchanged. |
