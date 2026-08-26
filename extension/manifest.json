@@ -1,0 +1,13 @@
+{
+  "_comment": "PLACEHOLDER — Manifest V3 Chrome Extension manifest. No code yet.",
+  "manifest_version": 3,
+  "name": "JobSync AI",
+  "version": "0.0.1",
+  "description": "AI-powered job application assistant — auto-fills forms from your verified profile.",
+  "permissions": [],
+  "host_permissions": [],
+  "content_scripts": [],
+  "background": {},
+  "side_panel": {},
+  "icons": {}
+}
