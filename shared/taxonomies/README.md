@@ -1,5 +1,7 @@
 # /shared/taxonomies/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 0 | **Owner:** TBD
+
 Fixed classification systems used by both client and server.
 
 ## Planned files

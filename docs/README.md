@@ -1,5 +1,7 @@
 # /docs/
 
+> **Status:** 🟡 In Progress | **Priority:** P1 | **Owner:** TBD
+
 Project documentation.
 
 ## Subdirectories

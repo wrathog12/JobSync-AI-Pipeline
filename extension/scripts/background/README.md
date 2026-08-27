@@ -1,5 +1,7 @@
 # /extension/scripts/background/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 1 Critical Path | **Owner:** TBD
+
 Service worker (MV3 background script).
 
 ## Planned modules

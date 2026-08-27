@@ -1,5 +1,7 @@
 # /server/app/services/inference/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 2 Critical | **Owner:** TBD
+
 LLM orchestration — the generative pipeline.
 
 ## Planned modules

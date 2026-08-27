@@ -1,5 +1,7 @@
 # /server/app/services/ingest/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 1 | **Owner:** TBD
+
 Resume/profile ingestion pipeline.
 
 ## Flow

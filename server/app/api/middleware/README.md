@@ -1,5 +1,7 @@
 # /server/app/api/middleware/
 
+> **Status:** 🔴 Not Started | **Priority:** P1 — Phase 1 | **Owner:** TBD
+
 Request middleware pipeline.
 
 ## Planned modules

@@ -1,5 +1,7 @@
 # /server/app/services/documents/
 
+> **Status:** ⚪ Deferred | **Priority:** P2 — Phase 3 | **Owner:** TBD
+
 Document generation service — resume and cover letter PDF creation.
 
 ## Architecture

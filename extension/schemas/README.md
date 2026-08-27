@@ -1,5 +1,7 @@
 # /extension/schemas/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 0 Foundation | **Owner:** TBD
+
 TypeScript type definitions generated from the shared source-of-truth schemas.
 
 > These are **generated** from `/shared/schemas/`, not hand-maintained.

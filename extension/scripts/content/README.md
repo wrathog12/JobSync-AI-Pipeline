@@ -1,5 +1,7 @@
 # /extension/scripts/content/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 1 Critical Path | **Owner:** TBD
+
 Content scripts injected into job-board pages via `content_scripts` in manifest.json.
 
 ## Planned modules
