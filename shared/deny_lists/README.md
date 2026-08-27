@@ -1,5 +1,7 @@
 # /shared/deny_lists/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 0 Non-Negotiable | **Owner:** TBD
+
 ATTESTATION deny-list — versioned, tested data that prevents auto-filling legally sensitive fields.
 
 ## Purpose (§5.1)

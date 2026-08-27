@@ -1,5 +1,7 @@
 # /server/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 0-1 | **Owner:** TBD
+
 FastAPI backend — the Inference and Processing Layer.
 
 ## Structure

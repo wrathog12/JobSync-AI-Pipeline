@@ -1,5 +1,7 @@
 # /shared/schemas/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 0 Foundation | **Owner:** TBD
+
 Canonical JSON Schema definitions — the single source of truth.
 
 ## Planned files

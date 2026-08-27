@@ -1,5 +1,7 @@
 # /shared/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 0 Foundation | **Owner:** TBD
+
 Single source of truth for cross-cutting definitions shared between the extension (TypeScript) and server (Python).
 
 > Generate language-specific types from these definitions. Never hand-maintain two copies.

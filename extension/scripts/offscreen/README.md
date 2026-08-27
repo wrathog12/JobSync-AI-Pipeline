@@ -1,5 +1,7 @@
 # /extension/scripts/offscreen/
 
+> **Status:** ⚪ Deferred | **Priority:** P3 — Phase 3 Only | **Owner:** TBD
+
 Offscreen document scripts (Phase 3).
 
 Used for compute-heavy tasks that would block or be killed in the service worker:

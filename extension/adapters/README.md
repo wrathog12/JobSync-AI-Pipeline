@@ -1,5 +1,7 @@
 # /extension/adapters/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 1 Critical Path | **Owner:** TBD
+
 Server-served JSON adapter files — one per ATS family.
 
 Each adapter maps a specific job board's DOM structure to the extension's field classification system.

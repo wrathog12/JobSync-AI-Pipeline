@@ -1,5 +1,7 @@
 # /server/app/core/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 0 | **Owner:** TBD
+
 Application configuration, settings, and constants.
 
 ## Planned modules

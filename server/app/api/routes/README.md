@@ -1,5 +1,7 @@
 # /server/app/api/routes/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 1 | **Owner:** TBD
+
 API endpoint definitions.
 
 ## Planned routes

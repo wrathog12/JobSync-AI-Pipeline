@@ -1,5 +1,7 @@
 # /eval/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 0 Deliverable | **Owner:** TBD
+
 Retrieval evaluation and safety test datasets.
 
 ## Purpose

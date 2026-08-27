@@ -1,5 +1,7 @@
 # /extension/scripts/sidepanel/
 
+> **Status:** 🔴 Not Started | **Priority:** P1 — Phase 1 | **Owner:** TBD
+
 Scripts powering the `chrome.sidePanel` UI — the primary user-facing surface.
 
 ## Planned modules

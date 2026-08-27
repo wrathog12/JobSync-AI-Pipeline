@@ -1,5 +1,7 @@
 # /extension/scripts/utils/
 
+> **Status:** 🔴 Not Started | **Priority:** P0 — Phase 1 Foundation | **Owner:** TBD
+
 Shared utility modules used across content scripts, background, and side panel.
 
 ## Planned modules
