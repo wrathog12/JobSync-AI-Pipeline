@@ -1,4 +1,4 @@
-# Architecture & Feasibility Analysis — Rev 2
+# Architecture & Feasibility Analysis — Version 1
 
 Review of `Context.md` (the job-application Chrome Extension ideation) **plus the retrieval/knowledge-base addendum.**
 
