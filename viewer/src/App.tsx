@@ -1,0 +1,250 @@
+import { useCallback, useEffect, useState } from 'react'
+import { api, type CompetencyInfo, type GenerationModeName, type MemoryView, type ModeInfo } from './api'
+import { MemoryPanel } from './MemoryPanel'
+import { TraceCard } from './TraceCard'
+import type { TraceView } from './types.generated'
+
+const SAMPLES = [
+  'What is your email address?',
+  'Tell us about a time you had to influence stakeholders without direct authority.',
+  'Describe a technical challenge you solved.',
+  'Tell us about a time something went wrong and what you learned.',
+  'Describe your experience managing a P&L.',
+  'Do you require sponsorship to work in the United States?',
+  'What is your GPA?',
+]
+
+const SAMPLE_JD = `Senior Platform Engineer — we run a high-volume payments platform.
+You will own service reliability end to end. Required: 5+ years backend, deep
+Kubernetes and Terraform experience, Go or Python, PostgreSQL at scale,
+and a track record of driving cross-team technical decisions.`
+
+type Tab = 'ask' | 'compare' | 'memory' | 'traces'
+
+export default function App() {
+  const [tab, setTab] = useState<Tab>('ask')
+  const [question, setQuestion] = useState(SAMPLES[1])
+  const [jd, setJd] = useState('')
+  const [maxChars, setMaxChars] = useState(500)
+  const [mode, setMode] = useState<GenerationModeName>('strict')
+
+  const [modes, setModes] = useState<ModeInfo[]>([])
+  const [competencies, setCompetencies] = useState<CompetencyInfo[]>([])
+  const [memory, setMemory] = useState<MemoryView | null>(null)
+
+  const [trace, setTrace] = useState<TraceView | null>(null)
+  const [compared, setCompared] = useState<Record<GenerationModeName, TraceView> | null>(null)
+  const [traces, setTraces] = useState<TraceView[]>([])
+
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    Promise.all([api.modes(), api.competencies(), api.memory()])
+      .then(([m, c, mem]) => {
+        setModes(m)
+        setCompetencies(c)
+        setMemory(mem)
+      })
+      .catch((e) => setError(String(e)))
+  }, [])
+
+  const refreshTraces = useCallback(() => {
+    api.traces().then(setTraces).catch((e) => setError(String(e)))
+  }, [])
+
+  const req = () => ({
+    question,
+    mode,
+    jd_text: jd || null,
+    max_chars: maxChars,
+    field_type: 'textarea',
+  })
+
+  const ask = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      setTrace(await api.answer(req() as never))
+      setCompared(null)
+      setTab('ask')
+      refreshTraces()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const compare = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      setCompared(await api.compare(req() as never))
+      setTab('compare')
+      refreshTraces()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="app">
+      <header className="top">
+        <h1>JobSync — Trace Viewer</h1>
+        <span className="phase">phase 0</span>
+      </header>
+      <p className="sub">
+        Everything except <strong>generate</strong> is the real pipeline: classification, the
+        attestation deny-list, BM25 + competency retrieval, the sufficiency gate, and the grounding
+        check. Generation is a labelled stub until an LLM is wired in Phase 1.
+      </p>
+
+      <div className="ask">
+        <label>Question (any form label — it does not need to exist on a real page)</label>
+        <textarea rows={2} value={question} onChange={(e) => setQuestion(e.target.value)} />
+
+        <div className="row">
+          <div style={{ flex: '2 1 300px' }}>
+            <label>Sample questions</label>
+            <select
+              style={{
+                width: '100%',
+                background: 'var(--bg)',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                padding: '9px 11px',
+              }}
+              value=""
+              onChange={(e) => e.target.value && setQuestion(e.target.value)}
+            >
+              <option value="">pick one…</option>
+              {SAMPLES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: '0 0 120px' }}>
+            <label>Max chars</label>
+            <input
+              type="number"
+              value={maxChars}
+              onChange={(e) => setMaxChars(Number(e.target.value) || 500)}
+            />
+          </div>
+          <div style={{ flex: '0 0 auto' }}>
+            <label>Mode</label>
+            <div className="modes">
+              {modes.map((m) => (
+                <button
+                  key={m.mode}
+                  data-active={mode === m.mode}
+                  title={`${m.description} (max claim distance ${m.max_claim_distance})`}
+                  onClick={() => setMode(m.mode)}
+                >
+                  {m.mode} <span style={{ opacity: 0.6 }}>{m.max_claim_distance.toFixed(2)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <label>
+            Job description (optional — disambiguates the question and drives skill matching)
+          </label>
+          <textarea rows={3} value={jd} onChange={(e) => setJd(e.target.value)} />
+          <button
+            className="btn ghost"
+            style={{ marginTop: 6, padding: '5px 10px', fontSize: 12 }}
+            onClick={() => setJd(SAMPLE_JD)}
+          >
+            use sample JD
+          </button>
+        </div>
+
+        <div className="actions">
+          <button className="btn" onClick={ask} disabled={busy}>
+            {busy ? 'running…' : 'Run'}
+          </button>
+          <button className="btn ghost" onClick={compare} disabled={busy}>
+            Compare all 3 modes
+          </button>
+        </div>
+        {error && <div className="err">{error}</div>}
+      </div>
+
+      <div className="tabs">
+        {(['ask', 'compare', 'memory', 'traces'] as Tab[]).map((t) => (
+          <button
+            key={t}
+            data-active={tab === t}
+            onClick={() => {
+              setTab(t)
+              if (t === 'traces') refreshTraces()
+            }}
+          >
+            {t === 'ask' ? 'Latest trace' : t === 'compare' ? 'Mode comparison' : t === 'memory' ? 'Memory' : 'History'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'ask' &&
+        (trace ? <TraceCard trace={trace} open /> : <div className="empty">Run a question above.</div>)}
+
+      {tab === 'compare' &&
+        (compared ? (
+          <>
+            <div className="compare">
+              {(['strict', 'optimize', 'aggressive'] as GenerationModeName[]).map((m) => {
+                const t = compared[m]
+                return (
+                  <div className="col" key={m}>
+                    <h4>{m}</h4>
+                    <div className="ceil">
+                      ceiling {t.max_claim_distance.toFixed(2)} · actual{' '}
+                      {t.claim_distance.toFixed(2)} · {t.chars} ch
+                    </div>
+                    <div className={`out${t.abstained ? ' abstain' : ''}`}>
+                      {t.abstained ? t.abstain_reason : t.answer}
+                    </div>
+                    {t.stretches.length > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        {t.stretches.map((s, i) => (
+                          <div className="stretchrow" key={i}>
+                            ↗ {s.claim}
+                            <div className="note">{s.note}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {(['strict', 'optimize', 'aggressive'] as GenerationModeName[]).map((m) => (
+              <TraceCard trace={compared[m]} key={m} />
+            ))}
+          </>
+        ) : (
+          <div className="empty">
+            Hit “Compare all 3 modes”. Add a JD first — that is what gives the embellished modes
+            something to stretch toward.
+          </div>
+        ))}
+
+      {tab === 'memory' && <MemoryPanel memory={memory} competencies={competencies} />}
+
+      {tab === 'traces' &&
+        (traces.length ? (
+          traces.map((t) => <TraceCard trace={t} key={t.trace_id} />)
+        ) : (
+          <div className="empty">No traces yet.</div>
+        ))}
+    </div>
+  )
+}
