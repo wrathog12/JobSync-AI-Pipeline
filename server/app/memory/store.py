@@ -9,13 +9,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from datetime import datetime, timezone
+
 from ..schemas.answer_memory import AnswerMemory, ApprovedAnswer
+from ..schemas.common import Provenance
 from ..schemas.competency import CompetencyGraph, SkillNode
 from ..schemas.evidence import EvidenceIndex
 from ..schemas.identity import Identity
 from ..schemas.ledger import Ledger
 from ..schemas.profile import Profile
 from .derive import build_competency_graph, build_evidence_index
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "profiles"
 DEFAULT_FIXTURE = FIXTURE_DIR / "sample_profile.json"
@@ -54,6 +59,43 @@ class MemoryStore:
         self.graph = build_competency_graph(self.ledger, self.evidence, self.declared_skills)
 
     # ── L0/L1/L2 key lookup: the DETERMINISTIC path, zero tokens ──────────────
+
+    def provenance_for(self, path: str) -> Provenance | None:
+        """Who vouched for the value at `path`, so callers can refuse to use it.
+
+        `common.py` says PARSED_UNCONFIRMED must never reach a DETERMINISTIC fill
+        or an ATTESTATION decision. Something has to actually check that, and it
+        needs the *record's* provenance rather than the value's — L1 carries one
+        provenance for the whole profile, L2 one per record.
+
+        Returns None when there is no owning record, which callers must treat the
+        same as unconfirmed rather than as permission.
+        """
+        if path.startswith("identity."):
+            return self.identity.provenance if self.identity else None
+        if path.startswith("profile."):
+            return self.profile.provenance if self.profile else None
+
+        if path == "ledger.total_years_experience":
+            # Aggregate: only as trustworthy as its least-trusted input, because a
+            # single unconfirmed job with a bad end date moves the total.
+            active = self.ledger.active_employment()
+            if not active:
+                return None
+            return min(
+                (job.provenance for job in active),
+                key=lambda p: (p.is_confirmed, p.confirmed_at or _EPOCH),
+            )
+        if path.startswith("ledger.employment.current."):
+            current = next(
+                (e for e in self.ledger.active_employment() if e.dates.is_current), None
+            )
+            return current.provenance if current else None
+        if path.startswith("ledger.education.latest."):
+            grads = [e for e in self.ledger.education if e.is_active]
+            latest = max(grads, key=lambda e: e.dates.end or "", default=None)
+            return latest.provenance if latest else None
+        return None
 
     def resolve_path(self, path: str) -> object | None:
         """Read a dotted profile path. Returns None for 'not set', which is a

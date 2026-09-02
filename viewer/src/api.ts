@@ -1,18 +1,39 @@
 import type {
   AnswerRequest,
   ApplicationSession,
+  ConfirmRequest,
+  ConfirmView,
   DocumentView,
+  StructureView,
   TraceView,
 } from './types.generated'
 
 const BASE = '/api'
+
+/** FastAPI puts everything useful in `detail`, and the LLM errors put a `blame`
+ * and a written explanation inside that. Throwing the status line alone would
+ * turn "that API key was rejected, copy it again" into "400 Bad Request". */
+async function errorFrom(res: Response, path: string): Promise<Error> {
+  let detail: unknown
+  try {
+    detail = (await res.json())?.detail
+  } catch {
+    /* not JSON — fall through to the status line */
+  }
+  if (typeof detail === 'string') return new Error(detail)
+  if (detail && typeof detail === 'object' && 'message' in detail) {
+    const d = detail as { message: string; blame?: string }
+    return new Error(d.blame ? `${d.message} (${d.blame})` : d.message)
+  }
+  return new Error(`${res.status} ${res.statusText} on ${path}`)
+}
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} on ${path}`)
+  if (!res.ok) throw await errorFrom(res, path)
   return res.json() as Promise<T>
 }
 
@@ -117,4 +138,19 @@ export const api = {
     }),
 
   documents: () => json<DocumentView[]>('/ingest/documents'),
+
+  // ── step 3: read a document into candidate records. Writes nothing. ──
+  structure: (docId: string) =>
+    json<StructureView>(`/structure/${docId}`, { method: 'POST' }),
+
+  candidate: (docId: string) => json<StructureView>(`/structure/${docId}`),
+
+  candidates: () => json<StructureView[]>('/structure'),
+
+  discardCandidate: (docId: string) =>
+    json<{ dropped: boolean }>(`/structure/${docId}`, { method: 'DELETE' }),
+
+  // ── step 4: the only thing that writes to L0/L1/L2 ──
+  confirm: (req: ConfirmRequest) =>
+    json<ConfirmView>('/confirm', { method: 'POST', body: JSON.stringify(req) }),
 }

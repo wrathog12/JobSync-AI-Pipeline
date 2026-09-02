@@ -8,10 +8,13 @@ from pydantic import BaseModel
 
 from .config import get_settings
 from .ingest import extract, extract_pasted, get_documents
-from .llm import LLMError, get_client, has_server_key
+from .llm import Blame, LLMError, LLMQuotaError, get_client, has_server_key
+from .memory.candidates import get_candidates
 from .memory.sessions import get_sessions
 from .memory.store import get_store
 from .pipeline import answer as answer_pipeline
+from .pipeline.confirm import ConfirmRequest, confirm
+from .pipeline.structure import structure_document
 from .schemas.common import MODE_DESCRIPTION, MODE_MAX_CLAIM_DISTANCE, GenerationMode
 from .schemas.trace import AnswerRequest, Trace
 from .taxonomy import attestation
@@ -258,6 +261,122 @@ def get_document(doc_id: str) -> dict:
 @app.delete("/ingest/documents/{doc_id}")
 def drop_document(doc_id: str) -> dict:
     return {"dropped": get_documents().drop(doc_id)}
+
+
+# ── step 3: structuring ────────────────────────────────────────────────────────
+
+#: `blame` maps straight onto the status code, because the status is the first
+#: thing a client branches on and it should already say who has to act. Sending
+#: 502 for a mistyped key would point the user at our status page.
+_LLM_STATUS = {
+    Blame.USER_KEY: 400,
+    Blame.PROVIDER: 502,
+    Blame.OURS: 500,
+    Blame.CONTENT: 422,
+}
+
+
+def _llm_status(exc: LLMError) -> int:
+    # Quota is the exception: it is the user's key, but 429 is what tells a client
+    # to back off rather than to re-prompt for credentials.
+    if isinstance(exc, LLMQuotaError):
+        return 429
+    return _LLM_STATUS.get(exc.blame, 500)
+
+
+def _structure_view(result) -> dict:  # noqa: ANN001 — StructureResult, plus properties
+    return {
+        **result.model_dump(mode="json"),
+        "record_count": result.record_count,
+        "achievement_count": result.achievement_count,
+        "unverified_quotes": result.unverified_quotes,
+        "blocking": [w.model_dump(mode="json") for w in result.blocking()],
+    }
+
+
+@app.post("/structure/{doc_id}")
+def structure(doc_id: str, api_key: str | None = None) -> dict:
+    """Read a document into candidate records. Still writes nothing to memory.
+
+    The result goes into the candidate store, and the copy kept there is the one
+    `/confirm` compares against — which is the whole reason it is stored server-side
+    instead of being handed to the client and taken back. Re-posting the same
+    doc_id is a deliberate retry and replaces the candidate.
+    """
+    doc = get_documents().get(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="unknown doc_id")
+    if not doc.is_usable:
+        # 422, not 500: the upload succeeded and the client has a real next step,
+        # which is to paste the text instead.
+        raise HTTPException(
+            status_code=422,
+            detail="This document cannot be structured: " + "; ".join(doc.blocking_reasons()),
+        )
+    try:
+        result = structure_document(doc, get_client(api_key))
+    except LLMError as exc:
+        raise HTTPException(
+            status_code=_llm_status(exc),
+            detail={"blame": exc.blame.value, "message": exc.user_message()},
+        ) from exc
+    return _structure_view(get_candidates().put(result))
+
+
+@app.get("/structure/{doc_id}")
+def get_structure(doc_id: str) -> dict:
+    result = get_candidates().get(doc_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="no candidate for this doc_id; POST first")
+    return _structure_view(result)
+
+
+@app.get("/structure")
+def list_structures() -> list[dict]:
+    return [_structure_view(r) for r in get_candidates().all()]
+
+
+@app.delete("/structure/{doc_id}")
+def drop_structure(doc_id: str) -> dict:
+    """Discarding a review. The document stays; only the reading of it goes."""
+    return {"dropped": get_candidates().drop(doc_id)}
+
+
+# ── step 4: confirmation, the only writer to L0/L1/L2 ──────────────────────────
+
+
+@app.post("/confirm")
+def confirm_candidate(req: ConfirmRequest) -> dict:
+    """Commit what the user accepted, and refuse what they clicked past.
+
+    Both the candidate and the source text come from the server's own stores rather
+    than the request. If the client supplied either, "did the user edit this bullet
+    or rubber-stamp the model's invention" would be a question the client answers
+    about itself, and the check would be theatre.
+    """
+    candidate = get_candidates().get(req.doc_id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=404,
+            detail="no candidate for this doc_id — structure it before confirming",
+        )
+    doc = get_documents().get(req.doc_id)
+    if doc is None:
+        # The candidate outlived its document, so the verbatim check has no
+        # haystack. Committing anyway would accept every bullet unverified.
+        raise HTTPException(
+            status_code=409,
+            detail="the source document is gone, so bullets cannot be verified; re-upload it",
+        )
+    try:
+        result = confirm(req, candidate, get_store(), doc.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        **result.model_dump(mode="json"),
+        "records_committed": result.records_committed,
+        "memory": get_store().stats(),
+    }
 
 
 # ── L6 sessions ────────────────────────────────────────────────────────────────

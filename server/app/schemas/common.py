@@ -46,7 +46,16 @@ class Provenance(BaseModel):
 
     @property
     def is_confirmed(self) -> bool:
-        return self.confidence == Confidence.VERIFIED and self.confirmed_at is not None
+        """A human has signed off on this value.
+
+        Deliberately not `confidence == VERIFIED`. A user clicking "yes, that's
+        right" produces `USER_STATED`, and requiring VERIFIED here would mark
+        everything they typed themselves as unconfirmed and block it from the
+        DETERMINISTIC path forever. VERIFIED stays reserved for a fact checked
+        against something external — a payslip, a transcript — which is worth
+        keeping expressible rather than spending on a button click.
+        """
+        return self.confidence != Confidence.PARSED_UNCONFIRMED and self.confirmed_at is not None
 
 
 # ── Generation modes ───────────────────────────────────────────────────────────

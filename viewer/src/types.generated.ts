@@ -452,6 +452,71 @@ export interface RawDocument {
   extracted_at: string;
 }
 
+export type StructureWarningCode = "quote_not_found" | "date_unparseable" | "date_imprecise" | "date_reversed" | "no_name" | "no_employment" | "multiple_current" | "authorization_mentioned" | "unknown_project_employer" | "truncated";
+
+export interface StructureWarning {
+  code: StructureWarningCode;
+  message: string;
+  record_id: string | null;
+}
+
+/** Candidate memory, built but not committed. */
+export interface StructureResult {
+  doc_id: string;
+  identity: Identity | null;
+  profile: Profile | null;
+  ledger: Ledger;
+  skills: string[];
+  headline: string | null;
+  summary: string | null;
+  languages: string[];
+  warnings: StructureWarning[];
+  model: string;
+  prompt_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  ms: number;
+}
+
+export interface Rejection {
+  record_id: string;
+  reason: string;
+}
+
+/** Per-record consent. Nothing is accepted by omission or by default. */
+export interface ConfirmRequest {
+  doc_id: string;
+  /** The candidate set as the user edited it. Compared against the server's copy. */
+  result: StructureResult;
+  /** Ledger record ids to commit. Anything not listed is discarded. */
+  accept_record_ids: string[];
+  accept_profile_paths: string[];
+  accept_skills: string[];
+  confirm_identity: boolean;
+  /** Required to overwrite a locked L0. Names change; silent overwrites are not how. */
+  unlock_identity: boolean;
+  /** New record id -> the existing record it corrects. The old one is kept. */
+  supersedes: Record<string, string>;
+}
+
+export interface ConfirmResult {
+  doc_id: string;
+  employment_committed: number;
+  education_committed: number;
+  projects_committed: number;
+  credentials_committed: number;
+  achievements_committed: number;
+  achievements_user_authored: number;
+  skills_committed: number;
+  profile_paths_committed: string[];
+  identity_committed: boolean;
+  identity_locked: boolean;
+  superseded: string[];
+  skipped_existing: string[];
+  rejections: Rejection[];
+  evidence_chunks: number;
+}
+
 /** What GET /traces actually returns: Trace plus computed totals. */
 export interface TraceView extends Trace {
   total_ms: number;
@@ -465,4 +530,19 @@ export interface DocumentView extends RawDocument {
   word_count: number;
   line_count: number;
   is_usable: boolean;
+}
+
+/** What the /structure endpoints return: StructureResult plus counts. */
+export interface StructureView extends StructureResult {
+  record_count: number;
+  achievement_count: number;
+  /** Achievements not found in the source. Non-zero means review carefully. */
+  unverified_quotes: number;
+  blocking: StructureWarning[];
+}
+
+/** What POST /confirm returns: ConfirmResult plus the resulting memory stats. */
+export interface ConfirmView extends ConfirmResult {
+  records_committed: number;
+  memory: Record<string, unknown>;
 }

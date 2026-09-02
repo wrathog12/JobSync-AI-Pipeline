@@ -390,6 +390,31 @@ def _record(
 
 def _deterministic(trace: Trace, field, store: MemoryStore) -> Trace:
     value = store.resolve_path(field.profile_path) if field.profile_path else None
+
+    # Unconfirmed data must not reach a form. A DETERMINISTIC fill is submitted
+    # verbatim with no review step in front of it, so an employer name the parser
+    # got wrong goes onto an application under the user's name. This is the check
+    # that makes the confirmation pass mean something — without it, structuring
+    # output is functionally already committed.
+    prov = store.provenance_for(field.profile_path) if field.profile_path else None
+    if value is not None and (prov is None or not prov.is_confirmed):
+        trace.abstained = True
+        trace.abstain_reason = (
+            f"'{field.profile_path}' was read from your documents but you haven't "
+            f"confirmed it yet. Confirm it once and this field fills itself from then on."
+        )
+        trace.steps.append(
+            TraceStep(
+                stage=Stage.GENERATE,
+                status=StageStatus.SKIPPED,
+                detail=(
+                    f"DETERMINISTIC field blocked: provenance is "
+                    f"{prov.confidence.value if prov else 'unknown'}, not confirmed"
+                ),
+            )
+        )
+        return trace
+
     if value is None:
         trace.abstained = True
         trace.abstain_reason = (

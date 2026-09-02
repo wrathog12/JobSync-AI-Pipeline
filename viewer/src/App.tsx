@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, type CompetencyInfo, type GenerationModeName, type MemoryView, type ModeInfo } from './api'
 import { IngestPanel } from './IngestPanel'
 import { MemoryPanel } from './MemoryPanel'
+import { ReviewPanel } from './ReviewPanel'
 import { SessionPanel } from './SessionPanel'
 import { TraceCard } from './TraceCard'
 import type { ApplicationSession, DocumentView, TraceView } from './types.generated'
@@ -21,13 +22,14 @@ You will own service reliability end to end. Required: 5+ years backend, deep
 Kubernetes and Terraform experience, Go or Python, PostgreSQL at scale,
 and a track record of driving cross-team technical decisions.`
 
-type Tab = 'ask' | 'compare' | 'session' | 'ingest' | 'memory' | 'traces'
+type Tab = 'ask' | 'compare' | 'session' | 'ingest' | 'review' | 'memory' | 'traces'
 
 const TAB_LABEL: Record<Tab, string> = {
   ask: 'Latest trace',
   compare: 'Mode comparison',
   session: 'Application',
   ingest: 'Ingest',
+  review: 'Review & confirm',
   memory: 'Memory',
   traces: 'History',
 }
@@ -86,6 +88,18 @@ export default function App() {
 
   const refreshTraces = useCallback(() => {
     api.traces().then(setTraces).catch((e) => setError(String(e)))
+  }, [])
+
+  /** Confirming writes to L0-L2 and rebuilds L3/L4, so both of these move at once
+   * — a stale competency list after a commit is how you end up debugging a
+   * retrieval "bug" that is really a cached panel. */
+  const refreshMemory = useCallback(() => {
+    Promise.all([api.memory(), api.competencies()])
+      .then(([mem, c]) => {
+        setMemory(mem)
+        setCompetencies(c)
+      })
+      .catch((e) => setError(String(e)))
   }, [])
 
   const req = (overrides: Record<string, unknown> = {}) => ({
@@ -294,7 +308,7 @@ export default function App() {
       </div>
 
       <div className="tabs">
-        {(['ask', 'compare', 'session', 'ingest', 'memory', 'traces'] as Tab[]).map((t) => (
+        {(['ask', 'compare', 'session', 'ingest', 'review', 'memory', 'traces'] as Tab[]).map((t) => (
           <button
             key={t}
             data-active={tab === t}
@@ -368,6 +382,8 @@ export default function App() {
       )}
 
       {tab === 'ingest' && <IngestPanel doc={doc} onExtract={setDoc} />}
+
+      {tab === 'review' && <ReviewPanel doc={doc} onCommitted={refreshMemory} />}
 
       {tab === 'memory' && <MemoryPanel memory={memory} competencies={competencies} />}
 

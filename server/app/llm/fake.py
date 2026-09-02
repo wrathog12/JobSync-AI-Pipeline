@@ -32,16 +32,20 @@ class FakeClient:
     """Returns scripted responses in order, and records what it was asked.
 
     Scripts may contain:
-      * a `BaseModel`  — returned as `parsed`
-      * a `str`        — returned as `text`
-      * an `LLMError`  — raised, for testing failure paths
-      * a callable     — `fn(call) -> BaseModel | str | LLMError`, for responses
-                         that must depend on the prompt
+      * a `BaseModel`   — returned as `parsed`
+      * a `str`         — returned as `text`
+      * an `LLMError`   — raised, for testing failure paths
+      * an `LLMResponse` — returned verbatim, for the cases where the envelope is
+                          the thing under test (truncation, finish_reason, usage)
+      * a callable      — `fn(call) -> any of the above`, for responses that must
+                          depend on the prompt
     """
 
     def __init__(
         self,
-        script: Iterable[BaseModel | str | LLMError | Callable[[LLMCall], object]] = (),
+        script: Iterable[
+            BaseModel | str | LLMError | LLMResponse | Callable[[LLMCall], object]
+        ] = (),
         *,
         model: str = "fake-model",
         models: list[str] | None = None,
@@ -69,6 +73,9 @@ class FakeClient:
 
         if isinstance(item, LLMError):
             raise item
+
+        if isinstance(item, LLMResponse):
+            return item
 
         if isinstance(item, BaseModel):
             text = item.model_dump_json()
