@@ -261,9 +261,9 @@ def test_a_mention_of_sponsorship_asks_the_user_instead_of_reading_it():
 
 def test_nothing_is_confirmed_and_nothing_is_stored():
     """Structuring must not touch durable memory; step 4 is the only writer."""
-    from app.memory.store import get_store
+    from app.memory.store import get_demo_store
 
-    store = get_store()
+    store = get_demo_store()
     before = store.stats()
     build_result(extracted(), raw_doc())
     assert store.stats() == before

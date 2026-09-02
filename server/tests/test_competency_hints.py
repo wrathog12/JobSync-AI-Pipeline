@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.memory.store import get_store
+from app.memory.store import get_demo_store
 from app.pipeline.answer import run
 from app.pipeline.classify import classify
 from app.schemas.field import FieldClass, FieldType, FormField
@@ -143,7 +143,7 @@ def test_deterministic_lookups_survive_stemming() -> None:
 
 def test_hinted_question_no_longer_falsely_abstains() -> None:
     """The whole point: this question used to abstain on evidence that exists."""
-    store = get_store()
+    store = get_demo_store()
     trace = run(
         AnswerRequest(
             question="Describe a situation where you had to influence people without authority.",

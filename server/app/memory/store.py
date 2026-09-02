@@ -41,6 +41,13 @@ class MemoryStore:
     # ── loading ────────────────────────────────────────────────────────────────
 
     def load_fixture(self, path: Path | None = None) -> None:
+        """Replace everything with a canned profile. Demos and tests only.
+
+        Never call this on a store a real user has confirmed anything into. It
+        overwrites L0-L2 wholesale, and because the fixture identity arrives
+        `locked`, the user's own name is then refused by the L0 lock — the guard
+        firing correctly in defence of a fictional person.
+        """
         path = path or DEFAULT_FIXTURE
         raw = json.loads(path.read_text(encoding="utf-8"))
 
@@ -52,6 +59,14 @@ class MemoryStore:
             answers=[ApprovedAnswer.model_validate(a) for a in raw.get("answer_memory", [])]
         )
         self.rebuild_derived()
+
+    def clear(self) -> None:
+        """Back to empty. The way out of a store that holds a mix of two people."""
+        self.__init__()  # type: ignore[misc]
+
+    @property
+    def is_empty(self) -> bool:
+        return self.identity is None and self.profile is None and not self.ledger.employment
 
     def rebuild_derived(self) -> None:
         """L3 and L4 are disposable. This is the only way they are ever written."""
@@ -152,9 +167,32 @@ STORE = MemoryStore()
 
 
 def get_store() -> MemoryStore:
+    """The user's own memory. Starts EMPTY, and stays empty until they confirm.
+
+    It used to lazily `load_fixture()` here whenever identity was None, which was
+    right while there was no ingestion path and the only way to see retrieval work
+    was a canned profile. Once confirmation existed it became a data-corruption
+    bug: the demo person arrives `locked`, so the real user's name is refused by
+    the L0 lock, and — worse, because it is silent — their employers are *appended*
+    next to the fixture's. Memory then holds two people, both confirmed, both
+    retrievable as evidence for a cover letter.
+
+    Empty is the honest starting state. `/memory/demo` loads the fixture when a
+    demo is what you actually want.
+    """
+    return STORE
+
+
+def get_demo_store() -> MemoryStore:
+    """The canned profile, loaded on first use.
+
+    For tests that assert on retrieval, ranking, or the attestation deny-list —
+    they need a populated profile and do not care whose. Naming it `demo` keeps
+    that explicit, so nothing acquires a fixture by accident again.
+    """
     if STORE.identity is None:
         STORE.load_fixture()
     return STORE
 
 
-__all__ = ["MemoryStore", "STORE", "get_store", "DEFAULT_FIXTURE"]
+__all__ = ["MemoryStore", "STORE", "get_store", "get_demo_store", "DEFAULT_FIXTURE"]

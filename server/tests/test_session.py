@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from app.memory.sessions import SessionStore
-from app.memory.store import get_store
+from app.memory.store import get_demo_store
 from app.pipeline.answer import run
 from app.schemas.common import GenerationMode
 from app.schemas.session import (
@@ -40,7 +40,7 @@ def sessions() -> SessionStore:
 
 @pytest.fixture()
 def store():
-    return get_store()
+    return get_demo_store()
 
 
 def _ask(question: str, session, store, mode=GenerationMode.STRICT, **kw):

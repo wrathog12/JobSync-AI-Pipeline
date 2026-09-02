@@ -319,6 +319,53 @@ def test_a_rubber_stamped_hallucination_is_refused_over_http(client, monkeypatch
     assert not any("Linux kernel" in c.text for c in store.evidence.chunks)
 
 
+def test_your_own_name_is_not_refused_by_a_demo_persons_lock(client, monkeypatch, store):
+    """The regression. `get_store()` used to lazily load a demo fixture on first
+    read of an empty store, and that fixture's identity arrives already `locked`.
+
+    So confirming your own résumé hit the L0 lock — the guard firing correctly in
+    defence of a fictional person — and, silently and worse, your employers were
+    appended next to theirs. Memory then held two people, both confirmed, both
+    retrievable as evidence for a real cover letter.
+    """
+    from app.memory.store import STORE, get_store
+
+    STORE.clear()
+    assert get_store().is_empty, "the app's own store must not acquire a profile by reading it"
+
+    doc_id, candidate = confirmable(client, monkeypatch)
+    body = client.post(
+        "/confirm",
+        json={
+            "doc_id": doc_id,
+            "result": candidate,
+            "accept_record_ids": ids(candidate),
+            "confirm_identity": True,
+        },
+    ).json()
+
+    assert body["identity_committed"] is True
+    assert body["rejections"] == []
+    assert store.identity.full_legal_name() == "Priya Raghunathan"
+    assert [e.employer for e in store.ledger.employment] == ["Northwind Logistics", "Cobalt Systems"]
+
+
+def test_the_demo_profile_is_loadable_on_purpose(client, monkeypatch, store):
+    """Still wanted — it is the only way to see retrieval work before you have
+    confirmed anything. It just has to be something you ask for."""
+    assert client.get("/health").json()["memory_empty"] is True
+
+    body = client.post("/memory/demo").json()
+    assert body["loaded"] is True
+    assert body["memory_empty"] is False
+    assert store.identity is not None
+
+    cleared = client.delete("/memory").json()
+    assert cleared["memory_empty"] is True
+    assert store.identity is None
+    assert store.evidence.chunks == [], "the derived layers go too"
+
+
 def test_nothing_is_committed_by_omission_over_http(client, monkeypatch, store):
     """A request that lists nothing must be a no-op. The wire format defaults every
     accept list to empty, so a client bug that drops a field has to fail safe."""

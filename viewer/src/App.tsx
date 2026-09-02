@@ -385,7 +385,9 @@ export default function App() {
 
       {tab === 'review' && <ReviewPanel doc={doc} onCommitted={refreshMemory} />}
 
-      {tab === 'memory' && <MemoryPanel memory={memory} competencies={competencies} />}
+      {tab === 'memory' && (
+        <MemoryPanel memory={memory} competencies={competencies} onChange={refreshMemory} />
+      )}
 
       {tab === 'traces' &&
         (traces.length ? (

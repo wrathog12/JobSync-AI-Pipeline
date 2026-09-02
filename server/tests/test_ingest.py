@@ -597,11 +597,11 @@ def test_documents_are_listed_and_fetchable(client):
 
 def test_ingest_writes_nothing_to_durable_memory(client):
     """The L0-L5 boundary again: extraction is staging, not knowledge."""
-    from app.memory.store import get_store
+    from app.memory.store import get_demo_store
 
-    before = get_store().stats()
+    before = get_demo_store().stats()
     client.post(
         "/ingest/upload",
         files={"file": ("resume.pdf", two_column_pdf(), "application/pdf")},
     )
-    assert get_store().stats() == before
+    assert get_demo_store().stats() == before

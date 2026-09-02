@@ -63,6 +63,10 @@ def health() -> dict:
         "status": "ok",
         "phase": 0,
         "attestation_denylist_version": attestation.VERSION,
+        # Whether memory is yours or a demo's is the first thing to know when a
+        # confirmation gets refused, so it is reported rather than inferred from
+        # the record counts.
+        "memory_empty": store.is_empty,
         "memory": store.stats(),
     }
 
@@ -167,7 +171,29 @@ def memory() -> dict:
             for c in store.evidence.chunks
         ],
         "stats": store.stats(),
+        "is_empty": store.is_empty,
     }
+
+
+@app.post("/memory/demo")
+def load_demo() -> dict:
+    """Replace memory with the canned demo profile.
+
+    Explicit, and destructive on purpose. This used to happen implicitly on the
+    first read of an empty store, which meant a real confirmation landed next to a
+    fictional person's records and the L0 lock then refused the real name.
+    """
+    store = get_store()
+    store.load_fixture()
+    return {"loaded": True, "memory_empty": store.is_empty, "memory": store.stats()}
+
+
+@app.delete("/memory")
+def clear_memory() -> dict:
+    """Wipe L0-L2 and the derived layers. The way out of a store holding a mix."""
+    store = get_store()
+    store.clear()
+    return {"cleared": True, "memory_empty": store.is_empty, "memory": store.stats()}
 
 
 @app.post("/answer")

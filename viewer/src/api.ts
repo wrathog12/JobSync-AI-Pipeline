@@ -90,6 +90,8 @@ export interface MemoryView {
   skills: Array<{ id: string; name: string; evidence_ids: string[]; years: number | null; proficiency: string | null }>
   evidence: EvidenceView[]
   stats: MemoryStats
+  /** True until you confirm something. Not the same as "still loading". */
+  is_empty: boolean
 }
 
 export const api = {
@@ -97,6 +99,12 @@ export const api = {
   modes: () => json<ModeInfo[]>('/meta/modes'),
   competencies: () => json<CompetencyInfo[]>('/meta/competencies'),
   memory: () => json<MemoryView>('/memory'),
+
+  // Both destructive and both explicit. The demo profile used to load itself on
+  // first read, which put a fictional person's locked identity in the way of the
+  // real user's own name.
+  loadDemo: () => json<{ loaded: boolean }>('/memory/demo', { method: 'POST' }),
+  clearMemory: () => json<{ cleared: boolean }>('/memory', { method: 'DELETE' }),
   traces: () => json<TraceView[]>('/traces'),
 
   answer: (req: AnswerRequest) =>
