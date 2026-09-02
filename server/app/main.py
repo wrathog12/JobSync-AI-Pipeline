@@ -4,11 +4,21 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
+from .memory.sessions import get_sessions
 from .memory.store import get_store
 from .pipeline import answer as answer_pipeline
 from .schemas.common import MODE_DESCRIPTION, MODE_MAX_CLAIM_DISTANCE, GenerationMode
 from .schemas.trace import AnswerRequest, Trace
+
+
+class SessionCreate(BaseModel):
+    jd_text: str | None = None
+    mode: GenerationMode = GenerationMode.STRICT
+    company: str | None = None
+    role_title: str | None = None
+    origin: str | None = None
 from .taxonomy import attestation
 from .taxonomy import canonical_questions as cq
 from .taxonomy import competencies as comp_tax
@@ -114,7 +124,10 @@ def memory() -> dict:
 @app.post("/answer")
 def generate_answer(req: AnswerRequest) -> dict:
     store = get_store()
-    trace = answer_pipeline.run(req, store)
+    session = get_sessions().get(req.session_id)
+    if req.session_id and session is None:
+        raise HTTPException(status_code=404, detail="unknown session_id")
+    trace = answer_pipeline.run(req, store, session)
     TRACES.insert(0, trace)
     del TRACES[MAX_TRACES:]
     return trace.model_dump_view()
@@ -126,15 +139,64 @@ def compare_modes(req: AnswerRequest) -> dict:
 
     This is the fastest way to calibrate the distance thresholds: you see
     exactly what 'aggressive' changed and which claims it stretched.
+
+    Deliberately runs WITHOUT a session even when one is given: three modes
+    answering the same field would otherwise spend the same evidence three times
+    and poison the session's anti-repetition ledger with two answers the user
+    never used.
     """
     store = get_store()
     out = {}
     for mode in GenerationMode:
-        trace = answer_pipeline.run(req.model_copy(update={"mode": mode}), store)
+        trace = answer_pipeline.run(req.model_copy(update={"mode": mode}), store, None)
         TRACES.insert(0, trace)
         out[mode.value] = trace.model_dump_view()
     del TRACES[MAX_TRACES:]
     return out
+
+
+# ── L6 sessions ────────────────────────────────────────────────────────────────
+
+
+@app.post("/sessions")
+def create_session(body: SessionCreate) -> dict:
+    """Open an application. The JD is stored once and reused on every later page."""
+    session = get_sessions().create(
+        jd_text=body.jd_text,
+        mode=body.mode,
+        company=body.company,
+        role_title=body.role_title,
+        origin=body.origin,
+    )
+    return session.model_dump(mode="json")
+
+
+@app.get("/sessions")
+def list_sessions() -> list[dict]:
+    return [s.model_dump(mode="json") for s in get_sessions().all()]
+
+
+@app.get("/sessions/{session_id}")
+def get_session(session_id: str) -> dict:
+    session = get_sessions().get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="unknown session_id")
+    return session.model_dump(mode="json")
+
+
+@app.post("/sessions/{session_id}/next-page")
+def next_page(session_id: str, page_url: str | None = None) -> dict:
+    """Advance the wizard. Answers and spent evidence carry across the boundary."""
+    session = get_sessions().get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="unknown session_id")
+    session.advance_page(page_url)
+    return session.model_dump(mode="json")
+
+
+@app.delete("/sessions/{session_id}")
+def drop_session(session_id: str) -> dict:
+    return {"dropped": get_sessions().drop(session_id)}
 
 
 @app.get("/traces")

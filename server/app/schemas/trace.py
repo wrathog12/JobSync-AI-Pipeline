@@ -20,6 +20,9 @@ from .field import ClassifiedField
 
 class Stage(str, Enum):
     CLASSIFY = "classify"
+    #: L6 idempotent replay. Runs before L5 because a session answer is more
+    #: specific than a durable one: it already reflects this JD and this mode.
+    SESSION_REPLAY = "session_replay"
     ANSWER_MEMORY = "answer_memory"
     RETRIEVE = "retrieve"
     RERANK = "rerank"
@@ -88,6 +91,14 @@ class Trace(BaseModel):
     field: ClassifiedField
     jd_excerpt: str | None = None
 
+    #: L6 linkage. None for a one-off call with no application in progress.
+    session_id: str | None = None
+    field_key: str | None = None
+    page_index: int = 0
+    #: Chunks skipped or demoted because this session already used them. Surfaced
+    #: because "why did it pick the second-best story" is otherwise unanswerable.
+    spent_chunks_avoided: list[str] = Field(default_factory=list)
+
     steps: list[TraceStep] = Field(default_factory=list)
 
     answer: str | None = Field(default=None, description="None when the system abstained.")
@@ -130,6 +141,14 @@ class AnswerRequest(BaseModel):
     jd_text: str | None = None
     max_chars: int | None = None
     field_type: str = "textarea"
+
+    #: L6. When set, the answer participates in an application: prior answers
+    #: constrain it, spent evidence is avoided, and the JD is inherited from the
+    #: session so page 6 of a wizard still knows what job this is.
+    session_id: str | None = None
+    #: Set true to bypass idempotent replay and deliberately regenerate a field
+    #: the session has already answered (the "try again" button).
+    regenerate: bool = False
 
 
 __all__ = [

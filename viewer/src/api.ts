@@ -1,4 +1,4 @@
-import type { AnswerRequest, TraceView } from './types.generated'
+import type { AnswerRequest, ApplicationSession, TraceView } from './types.generated'
 
 const BASE = '/api'
 
@@ -81,4 +81,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+
+  // ── L6 sessions: one application, many pages ──
+  startSession: (body: { jd_text?: string | null; mode?: GenerationModeName; company?: string | null }) =>
+    json<ApplicationSession>('/sessions', { method: 'POST', body: JSON.stringify(body) }),
+
+  session: (id: string) => json<ApplicationSession>(`/sessions/${id}`),
+
+  nextPage: (id: string) =>
+    json<ApplicationSession>(`/sessions/${id}/next-page`, { method: 'POST' }),
+
+  endSession: (id: string) =>
+    json<{ dropped: boolean }>(`/sessions/${id}`, { method: 'DELETE' }),
 }

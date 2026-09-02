@@ -194,13 +194,65 @@ QUESTION_NOISE: frozenset[str] = frozenset(
 #: wrong DETERMINISTIC answer is worse than no answer, so this errs short.
 MAX_LABEL_TOKENS_FOR_UNIGRAM_ALIAS = 2
 
+#: Alias matching requires a FULL subset of the alias's content words. A partial
+#: (coverage-ratio) match was tried and reverted: allowing 3-of-4 words let the
+#: generic opener "tell us about [yourself]" match "tell us about a time you
+#: mentored someone", routing a mentorship question to `cover_letter` at 0.81.
+#:
+#: The lesson generalises. Aliases share their low-information words — "tell",
+#: "describe", "experience" — so any partial match is dominated by boilerplate,
+#: and a confidently wrong canonical ID is worse than no ID at all. Robustness to
+#: phrasing belongs in `competency_hints` (which only widens retrieval) and later
+#: in the tier-2 LLM classifier, NOT in loosening this table.
+#:
+#: Suffix rewrites, longest-first. Deliberately a fixed table rather than a real
+#: stemmer: form labels are short and a heavier stemmer would collapse words that
+#: must stay distinct in a DETERMINISTIC lookup.
+_SUFFIXES: tuple[tuple[str, str], ...] = (
+    ("ships", ""),
+    ("ship", ""),
+    ("ments", ""),
+    ("ment", ""),
+    ("ies", "y"),
+    ("ing", ""),
+    ("ed", ""),
+    ("es", ""),
+    ("s", ""),
+)
+_MIN_STEM = 4
+
 
 def normalize(label: str) -> str:
     return " ".join(_NORMALIZE_RE.sub(" ", label.lower()).split())
 
 
+def stem(token: str) -> str:
+    """Collapse inflections so "mentored", "mentoring" and "mentorship" all match "mentor".
+
+    Without this the alias table needs every inflection of every word written out
+    by hand, and the one you forget is the one the form uses.
+    """
+    for suffix, replacement in _SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) + len(replacement) >= _MIN_STEM:
+            token = token[: len(token) - len(suffix)] + replacement
+            break
+    # "manage"/"managing" both reach "manag" only if the silent -e goes too.
+    if token.endswith("e") and len(token) > _MIN_STEM:
+        token = token[:-1]
+    return token
+
+
 def _content_tokens(text: str) -> list[str]:
-    return [t for t in normalize(text).split() if t not in QUESTION_NOISE]
+    return [stem(t) for t in normalize(text).split() if t not in QUESTION_NOISE]
+
+
+def content_stems(text: str) -> list[str]:
+    """Public view of the tokenizer, so the competency hinter stems identically.
+
+    Two tokenizers would drift, and the drift would be invisible: a hint keyed on
+    "mentor" would silently stop firing the day this one changed.
+    """
+    return _content_tokens(text)
 
 
 def by_id(question_id: str) -> CanonicalQuestion | None:
@@ -208,10 +260,11 @@ def by_id(question_id: str) -> CanonicalQuestion | None:
 
 
 def resolve(label: str) -> tuple[CanonicalQuestion | None, float]:
-    """Alias-dictionary lookup on content tokens. Returns (question, confidence).
+    """Alias-dictionary lookup on stemmed content tokens. Returns (question, confidence).
 
-    An alias matches when ALL of its content words appear in the label, in any
-    order. Longer aliases score higher, because they are stronger evidence.
+    An alias matches when enough of its content words appear in the label, in any
+    order. Longer aliases score higher, because they are stronger evidence, and a
+    partial match scores below an exact one so a shorter exact alias still wins.
     """
     label_tokens = _content_tokens(label)
     if not label_tokens:
@@ -224,16 +277,19 @@ def resolve(label: str) -> tuple[CanonicalQuestion | None, float]:
     for q in QUESTIONS:
         for alias in q.aliases:
             a_tokens = _content_tokens(alias)
-            if not a_tokens or not set(a_tokens).issubset(label_set):
+            if not a_tokens:
+                continue
+            a_set = set(a_tokens)
+            if not a_set.issubset(label_set):
                 continue
 
-            if len(a_tokens) == 1 and len(label_tokens) > MAX_LABEL_TOKENS_FOR_UNIGRAM_ALIAS:
+            if len(a_set) == 1 and len(label_tokens) > MAX_LABEL_TOKENS_FOR_UNIGRAM_ALIAS:
                 continue
 
-            if set(a_tokens) == label_set:
+            if a_set == label_set:
                 return q, 1.0
 
-            score = min(0.95, 0.45 + 0.17 * len(a_tokens))
+            score = min(0.95, 0.45 + 0.17 * len(a_set))
             if score > best_score:
                 best, best_score = q, score
 

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type CompetencyInfo, type GenerationModeName, type MemoryView, type ModeInfo } from './api'
 import { MemoryPanel } from './MemoryPanel'
+import { SessionPanel } from './SessionPanel'
 import { TraceCard } from './TraceCard'
-import type { TraceView } from './types.generated'
+import type { ApplicationSession, TraceView } from './types.generated'
 
 const SAMPLES = [
   'What is your email address?',
@@ -19,7 +20,26 @@ You will own service reliability end to end. Required: 5+ years backend, deep
 Kubernetes and Terraform experience, Go or Python, PostgreSQL at scale,
 and a track record of driving cross-team technical decisions.`
 
-type Tab = 'ask' | 'compare' | 'memory' | 'traces'
+type Tab = 'ask' | 'compare' | 'session' | 'memory' | 'traces'
+
+/** A multi-page wizard, condensed: each entry is one "page" of one application. */
+const WIZARD: { page: string; questions: string[] }[] = [
+  {
+    page: '1 — background',
+    questions: ['Tell us about a time you led a team through a difficult migration.'],
+  },
+  {
+    page: '2 — working style',
+    questions: [
+      'Describe a situation where you had to influence people without authority.',
+      'Tell us about a time you mentored someone.',
+    ],
+  },
+  {
+    page: '3 — reliability',
+    questions: ['Tell us about a time something went wrong and what you learned.'],
+  },
+]
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('ask')
@@ -35,6 +55,8 @@ export default function App() {
   const [trace, setTrace] = useState<TraceView | null>(null)
   const [compared, setCompared] = useState<Record<GenerationModeName, TraceView> | null>(null)
   const [traces, setTraces] = useState<TraceView[]>([])
+
+  const [session, setSession] = useState<ApplicationSession | null>(null)
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,21 +75,73 @@ export default function App() {
     api.traces().then(setTraces).catch((e) => setError(String(e)))
   }, [])
 
-  const req = () => ({
+  const req = (overrides: Record<string, unknown> = {}) => ({
     question,
     mode,
     jd_text: jd || null,
     max_chars: maxChars,
     field_type: 'textarea',
+    session_id: session?.session_id ?? null,
+    ...overrides,
   })
 
-  const ask = async () => {
+  const refreshSession = useCallback(async (id: string) => {
+    setSession(await api.session(id))
+  }, [])
+
+  const ask = async (overrides: Record<string, unknown> = {}) => {
     setBusy(true)
     setError(null)
     try {
-      setTrace(await api.answer(req() as never))
+      setTrace(await api.answer(req(overrides) as never))
       setCompared(null)
       setTab('ask')
+      refreshTraces()
+      if (session) await refreshSession(session.session_id)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const startSession = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const s = await api.startSession({ jd_text: jd || SAMPLE_JD, mode })
+      if (!jd) setJd(SAMPLE_JD)
+      setSession(s)
+      setTab('session')
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Walk the whole wizard, so the multi-page behaviour is visible in one click. */
+  const runWizard = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const s = session ?? (await api.startSession({ jd_text: jd || SAMPLE_JD, mode }))
+      if (!jd) setJd(SAMPLE_JD)
+      let current = s
+      for (const [i, page] of WIZARD.entries()) {
+        if (i > 0) current = await api.nextPage(current.session_id)
+        for (const q of page.questions) {
+          await api.answer({
+            question: q,
+            mode,
+            max_chars: maxChars,
+            field_type: 'textarea',
+            session_id: current.session_id,
+          } as never)
+        }
+      }
+      setSession(await api.session(current.session_id))
+      setTab('session')
       refreshTraces()
     } catch (e) {
       setError(String(e))
@@ -168,27 +242,62 @@ export default function App() {
         </div>
 
         <div className="actions">
-          <button className="btn" onClick={ask} disabled={busy}>
+          <button className="btn" onClick={() => ask()} disabled={busy}>
             {busy ? 'running…' : 'Run'}
           </button>
           <button className="btn ghost" onClick={compare} disabled={busy}>
             Compare all 3 modes
+          </button>
+          {session && (
+            <button
+              className="btn ghost"
+              onClick={() => ask({ regenerate: true })}
+              disabled={busy}
+              title="Bypass session replay and generate a fresh answer for this field"
+            >
+              Regenerate
+            </button>
+          )}
+        </div>
+
+        <div className="actions" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          {session ? (
+            <span className="phase">
+              application {session.session_id} · page {session.page_index} ·{' '}
+              {session.answered.length} fields
+            </span>
+          ) : (
+            <button className="btn ghost" onClick={startSession} disabled={busy}>
+              Start an application (L6)
+            </button>
+          )}
+          <button className="btn ghost" onClick={runWizard} disabled={busy}>
+            {busy ? 'running…' : 'Run the 3-page wizard'}
           </button>
         </div>
         {error && <div className="err">{error}</div>}
       </div>
 
       <div className="tabs">
-        {(['ask', 'compare', 'memory', 'traces'] as Tab[]).map((t) => (
+        {(['ask', 'compare', 'session', 'memory', 'traces'] as Tab[]).map((t) => (
           <button
             key={t}
             data-active={tab === t}
             onClick={() => {
               setTab(t)
               if (t === 'traces') refreshTraces()
+              if (t === 'session' && session) refreshSession(session.session_id)
             }}
           >
-            {t === 'ask' ? 'Latest trace' : t === 'compare' ? 'Mode comparison' : t === 'memory' ? 'Memory' : 'History'}
+            {t === 'ask'
+              ? 'Latest trace'
+              : t === 'compare'
+                ? 'Mode comparison'
+                : t === 'session'
+                  ? `Application${session ? ` (${session.answered.length})` : ''}`
+                  : t === 'memory'
+                    ? 'Memory'
+                    : 'History'}
           </button>
         ))}
       </div>
@@ -236,6 +345,19 @@ export default function App() {
             something to stretch toward.
           </div>
         ))}
+
+      {tab === 'session' && (
+        <SessionPanel
+          session={session}
+          onNextPage={async () => {
+            if (session) setSession(await api.nextPage(session.session_id))
+          }}
+          onEnd={async () => {
+            if (session) await api.endSession(session.session_id)
+            setSession(null)
+          }}
+        />
+      )}
 
       {tab === 'memory' && <MemoryPanel memory={memory} competencies={competencies} />}
 

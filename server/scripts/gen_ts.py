@@ -23,6 +23,7 @@ from app.schemas.evidence import EvidenceChunk, RetrievedChunk  # noqa: E402
 from app.schemas.identity import Identity  # noqa: E402
 from app.schemas.ledger import Ledger  # noqa: E402
 from app.schemas.profile import Profile  # noqa: E402
+from app.schemas.session import AnsweredField, ApplicationSession  # noqa: E402
 from app.schemas.trace import AnswerRequest, Trace  # noqa: E402
 
 EXPORTS = [
@@ -38,6 +39,8 @@ EXPORTS = [
     AnswerMemory,
     Trace,
     AnswerRequest,
+    AnsweredField,
+    ApplicationSession,
 ]
 
 OUT = ROOT.parent / "viewer" / "src" / "types.generated.ts"
