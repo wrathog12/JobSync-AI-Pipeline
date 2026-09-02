@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .ingest import extract, extract_pasted, get_documents
 from .memory.sessions import get_sessions
 from .memory.store import get_store
 from .pipeline import answer as answer_pipeline
 from .schemas.common import MODE_DESCRIPTION, MODE_MAX_CLAIM_DISTANCE, GenerationMode
 from .schemas.trace import AnswerRequest, Trace
+from .taxonomy import attestation
+from .taxonomy import canonical_questions as cq
+from .taxonomy import competencies as comp_tax
+
+#: Bigger than any résumé, small enough that a mis-drag doesn't stall the server.
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 class SessionCreate(BaseModel):
@@ -19,9 +26,11 @@ class SessionCreate(BaseModel):
     company: str | None = None
     role_title: str | None = None
     origin: str | None = None
-from .taxonomy import attestation
-from .taxonomy import canonical_questions as cq
-from .taxonomy import competencies as comp_tax
+
+
+class PasteRequest(BaseModel):
+    text: str
+    filename: str | None = None
 
 app = FastAPI(
     title="JobSync Intelligence Layer",
@@ -153,6 +162,65 @@ def compare_modes(req: AnswerRequest) -> dict:
         out[mode.value] = trace.model_dump_view()
     del TRACES[MAX_TRACES:]
     return out
+
+
+# ── ingest ─────────────────────────────────────────────────────────────────────
+
+
+def _doc_view(doc) -> dict:  # noqa: ANN001 — RawDocument, plus computed counts
+    """Counts are properties on the model, so they must be flattened in by hand."""
+    return {
+        **doc.model_dump(mode="json"),
+        "char_count": doc.char_count,
+        "word_count": doc.word_count,
+        "line_count": doc.line_count,
+        "is_usable": doc.is_usable,
+    }
+
+
+@app.post("/ingest/upload")
+async def upload_document(file: UploadFile = File(...)) -> dict:
+    """Extract text from a résumé. Nothing is written to memory by this call.
+
+    A blocking warning is a 200, not a 4xx: the extraction genuinely happened and
+    the client needs the warning text to tell the user what to do about it.
+    """
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File is {len(data) // 1_048_576} MB; the limit is "
+            f"{MAX_UPLOAD_BYTES // 1_048_576} MB.",
+        )
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty upload.")
+    doc = get_documents().put(extract(data, file.filename))
+    return _doc_view(doc)
+
+
+@app.post("/ingest/paste")
+def paste_document(body: PasteRequest) -> dict:
+    """The escape hatch for scans and exotic templates. Always works."""
+    doc = get_documents().put(extract_pasted(body.text, body.filename))
+    return _doc_view(doc)
+
+
+@app.get("/ingest/documents")
+def list_documents() -> list[dict]:
+    return [_doc_view(d) for d in get_documents().all()]
+
+
+@app.get("/ingest/documents/{doc_id}")
+def get_document(doc_id: str) -> dict:
+    doc = get_documents().get(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="unknown doc_id")
+    return _doc_view(doc)
+
+
+@app.delete("/ingest/documents/{doc_id}")
+def drop_document(doc_id: str) -> dict:
+    return {"dropped": get_documents().drop(doc_id)}
 
 
 # ── L6 sessions ────────────────────────────────────────────────────────────────

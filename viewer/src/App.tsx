@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, type CompetencyInfo, type GenerationModeName, type MemoryView, type ModeInfo } from './api'
+import { IngestPanel } from './IngestPanel'
 import { MemoryPanel } from './MemoryPanel'
 import { SessionPanel } from './SessionPanel'
 import { TraceCard } from './TraceCard'
-import type { ApplicationSession, TraceView } from './types.generated'
+import type { ApplicationSession, DocumentView, TraceView } from './types.generated'
 
 const SAMPLES = [
   'What is your email address?',
@@ -20,7 +21,16 @@ You will own service reliability end to end. Required: 5+ years backend, deep
 Kubernetes and Terraform experience, Go or Python, PostgreSQL at scale,
 and a track record of driving cross-team technical decisions.`
 
-type Tab = 'ask' | 'compare' | 'session' | 'memory' | 'traces'
+type Tab = 'ask' | 'compare' | 'session' | 'ingest' | 'memory' | 'traces'
+
+const TAB_LABEL: Record<Tab, string> = {
+  ask: 'Latest trace',
+  compare: 'Mode comparison',
+  session: 'Application',
+  ingest: 'Ingest',
+  memory: 'Memory',
+  traces: 'History',
+}
 
 /** A multi-page wizard, condensed: each entry is one "page" of one application. */
 const WIZARD: { page: string; questions: string[] }[] = [
@@ -57,16 +67,19 @@ export default function App() {
   const [traces, setTraces] = useState<TraceView[]>([])
 
   const [session, setSession] = useState<ApplicationSession | null>(null)
+  const [doc, setDoc] = useState<DocumentView | null>(null)
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    Promise.all([api.modes(), api.competencies(), api.memory()])
-      .then(([m, c, mem]) => {
+    Promise.all([api.modes(), api.competencies(), api.memory(), api.documents()])
+      .then(([m, c, mem, docs]) => {
         setModes(m)
         setCompetencies(c)
         setMemory(mem)
+        // Survive a page reload: the server still holds anything already extracted.
+        if (docs.length) setDoc(docs[0])
       })
       .catch((e) => setError(String(e)))
   }, [])
@@ -168,12 +181,14 @@ export default function App() {
     <div className="app">
       <header className="top">
         <h1>JobSync — Trace Viewer</h1>
-        <span className="phase">phase 0</span>
+        <span className="phase">phase 1</span>
       </header>
       <p className="sub">
-        Everything except <strong>generate</strong> is the real pipeline: classification, the
-        attestation deny-list, BM25 + competency retrieval, the sufficiency gate, and the grounding
-        check. Generation is a labelled stub until an LLM is wired in Phase 1.
+        Everything except <strong>generate</strong> is the real pipeline: ingest, classification, the
+        attestation deny-list, BM25 + competency retrieval, the sufficiency gate, the grounding
+        check, and L6 session state across wizard pages. Generation is still a labelled stub — it
+        concatenates retrieved evidence rather than writing prose, so judge the retrieval and the
+        gate here, not the wording.
       </p>
 
       <div className="ask">
@@ -279,7 +294,7 @@ export default function App() {
       </div>
 
       <div className="tabs">
-        {(['ask', 'compare', 'session', 'memory', 'traces'] as Tab[]).map((t) => (
+        {(['ask', 'compare', 'session', 'ingest', 'memory', 'traces'] as Tab[]).map((t) => (
           <button
             key={t}
             data-active={tab === t}
@@ -289,15 +304,8 @@ export default function App() {
               if (t === 'session' && session) refreshSession(session.session_id)
             }}
           >
-            {t === 'ask'
-              ? 'Latest trace'
-              : t === 'compare'
-                ? 'Mode comparison'
-                : t === 'session'
-                  ? `Application${session ? ` (${session.answered.length})` : ''}`
-                  : t === 'memory'
-                    ? 'Memory'
-                    : 'History'}
+            {TAB_LABEL[t]}
+            {t === 'session' && session ? ` (${session.answered.length})` : ''}
           </button>
         ))}
       </div>
@@ -358,6 +366,8 @@ export default function App() {
           }}
         />
       )}
+
+      {tab === 'ingest' && <IngestPanel doc={doc} onExtract={setDoc} />}
 
       {tab === 'memory' && <MemoryPanel memory={memory} competencies={competencies} />}
 

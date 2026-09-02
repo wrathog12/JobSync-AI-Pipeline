@@ -8,6 +8,11 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
+    # Ingest. PyMuPDF is used at line granularity for column detection — see
+    # app/ingest/columns.py, which depends on lines having tight bounding boxes.
+    "pymupdf>=1.24",
+    "python-docx>=1.1",
+    "python-multipart>=0.0.9",  # UploadFile
 ]
 
 [project.optional-dependencies]

@@ -1,4 +1,9 @@
-import type { AnswerRequest, ApplicationSession, TraceView } from './types.generated'
+import type {
+  AnswerRequest,
+  ApplicationSession,
+  DocumentView,
+  TraceView,
+} from './types.generated'
 
 const BASE = '/api'
 
@@ -93,4 +98,23 @@ export const api = {
 
   endSession: (id: string) =>
     json<{ dropped: boolean }>(`/sessions/${id}`, { method: 'DELETE' }),
+
+  // ── ingest: documents in, text out ──
+  upload: async (file: File) => {
+    // No Content-Type header: the browser must set the multipart boundary itself,
+    // and `json()` would override it with application/json.
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch(`${BASE}/ingest/upload`, { method: 'POST', body })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} on /ingest/upload`)
+    return (await res.json()) as DocumentView
+  },
+
+  paste: (text: string, filename?: string) =>
+    json<DocumentView>('/ingest/paste', {
+      method: 'POST',
+      body: JSON.stringify({ text, filename: filename ?? null }),
+    }),
+
+  documents: () => json<DocumentView[]>('/ingest/documents'),
 }

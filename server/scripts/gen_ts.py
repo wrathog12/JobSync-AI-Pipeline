@@ -21,6 +21,7 @@ from app.schemas.answer_memory import AnswerMemory, ApprovedAnswer  # noqa: E402
 from app.schemas.competency import CompetencyGraph, SkillMatch, SkillNode  # noqa: E402
 from app.schemas.evidence import EvidenceChunk, RetrievedChunk  # noqa: E402
 from app.schemas.identity import Identity  # noqa: E402
+from app.schemas.ingest import ExtractionWarning, RawDocument  # noqa: E402
 from app.schemas.ledger import Ledger  # noqa: E402
 from app.schemas.profile import Profile  # noqa: E402
 from app.schemas.session import AnsweredField, ApplicationSession  # noqa: E402
@@ -41,6 +42,8 @@ EXPORTS = [
     AnswerRequest,
     AnsweredField,
     ApplicationSession,
+    ExtractionWarning,
+    RawDocument,
 ]
 
 OUT = ROOT.parent / "viewer" / "src" / "types.generated.ts"
@@ -142,6 +145,14 @@ def main() -> None:
                 "  total_ms: number;",
                 "  total_tokens: number;",
                 "  cached_tokens: number;",
+                "}",
+                "",
+                "/** What the /ingest endpoints return: RawDocument plus computed counts. */",
+                "export interface DocumentView extends RawDocument {",
+                "  char_count: number;",
+                "  word_count: number;",
+                "  line_count: number;",
+                "  is_usable: boolean;",
                 "}",
                 "",
             ]

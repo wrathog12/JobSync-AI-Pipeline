@@ -422,9 +422,47 @@ export interface ApplicationSession {
   stretches: ClaimStretch[];
 }
 
+export type WarningCode = "no_text_layer" | "encrypted" | "too_short" | "unsupported_type" | "corrupt" | "multi_column" | "many_pages" | "garbled";
+
+/** A problem worth showing the user, in their words rather than ours. */
+export interface ExtractionWarning {
+  code: WarningCode;
+  /** User-facing. Says what to do, not just what broke. */
+  message: string;
+  /** True => structuring must not run. The text is unusable, not just suspect. */
+  blocking: boolean;
+}
+
+export type DocumentKind = "pdf" | "docx" | "text" | "pasted";
+
+export type Layout = "single_column" | "multi_column" | "unknown";
+
+/** Extracted text plus everything we know about how well the extraction went. */
+export interface RawDocument {
+  doc_id: string;
+  kind: DocumentKind;
+  filename: string | null;
+  text: string;
+  /** 0 for non-paged input. */
+  page_count: number;
+  layout: Layout;
+  warnings: ExtractionWarning[];
+  /** Of the ORIGINAL bytes. Re-uploading the same file is a no-op, so a user who clicks twice does not get two candidate profiles to reconcile. */
+  sha256: string;
+  extracted_at: string;
+}
+
 /** What GET /traces actually returns: Trace plus computed totals. */
 export interface TraceView extends Trace {
   total_ms: number;
   total_tokens: number;
   cached_tokens: number;
+}
+
+/** What the /ingest endpoints return: RawDocument plus computed counts. */
+export interface DocumentView extends RawDocument {
+  char_count: number;
+  word_count: number;
+  line_count: number;
+  is_usable: boolean;
 }
