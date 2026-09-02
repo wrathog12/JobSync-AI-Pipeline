@@ -6,7 +6,9 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from .config import get_settings
 from .ingest import extract, extract_pasted, get_documents
+from .llm import LLMError, get_client, has_server_key
 from .memory.sessions import get_sessions
 from .memory.store import get_store
 from .pipeline import answer as answer_pipeline
@@ -103,6 +105,41 @@ def questions() -> list[dict]:
         }
         for q in cq.all_questions()
     ]
+
+
+@app.get("/meta/llm")
+def llm_status(api_key: str | None = None) -> dict:
+    """What the LLM layer is configured to do — never the key itself.
+
+    `has_server_key` is the only thing this reports about credentials, and it is a
+    boolean by design: a "…last4" preview here would be a key fragment sitting in
+    a GET response for no benefit.
+
+    Passing `?api_key=` asks the provider which models that key can actually
+    reach, which is worth doing on BYOK: model names get retired, and "404 model
+    not found" on a user's first upload is a bad first impression. The call is
+    only made when a key is supplied, so the default path stays free and offline.
+    """
+    s = get_settings()
+    out: dict = {
+        "provider": "gemini",
+        "model_fast": s.llm_model_fast,
+        "model_strong": s.llm_model_strong,
+        "has_server_key": has_server_key(),
+        "require_user_key": s.require_user_key,
+        "max_output_tokens": s.llm_max_output_tokens,
+        "thinking_budget_fast": s.thinking_budget_fast,
+        "models": None,
+        "error": None,
+    }
+    if api_key:
+        try:
+            out["models"] = get_client(api_key).list_models()
+        except LLMError as exc:
+            # A 200 with `error` set, not a 4xx: the viewer wants to render "your
+            # key was rejected, here's why" next to the rest of the config.
+            out["error"] = {"blame": exc.blame.value, "message": exc.user_message()}
+    return out
 
 
 @app.get("/memory")
