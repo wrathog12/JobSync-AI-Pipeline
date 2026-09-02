@@ -11,6 +11,8 @@ dist/
 build/
 *.crx
 *.pem
+*.egg-info/
+*.tsbuildinfo
 
 # IDE
 .vscode/

@@ -1,0 +1,238 @@
+{
+  "_comment": "Phase 0 fixture. Deliberately INCOMPLETE: no P&L, no conflict-resolution, no cost-efficiency evidence, and one unbacked declared skill (GraphQL). Those gaps are what exercise the abstention path and the unbacked-skill warning.",
+
+  "identity": {
+    "legal_first": "Aditya",
+    "legal_middle": null,
+    "legal_last": "Raman",
+    "preferred_name": "Adi",
+    "date_of_birth": "1996-04-11",
+    "citizenship": ["IN"],
+    "pronouns": null,
+    "locked": true,
+    "locked_at": "2026-08-20T10:14:00Z",
+    "provenance": {
+      "confidence": "verified",
+      "source": "user_entered",
+      "confirmed_at": "2026-08-20T10:14:00Z",
+      "updated_at": "2026-08-20T10:14:00Z"
+    }
+  },
+
+  "profile": {
+    "email": "adi.raman@example.com",
+    "phone_e164": "+919820045511",
+    "location": { "city": "Bengaluru", "region": "Karnataka", "country": "IN", "postal": "560103" },
+    "links": {
+      "linkedin": "https://linkedin.com/in/adiraman",
+      "github": "https://github.com/adiraman",
+      "portfolio": null,
+      "other": {}
+    },
+    "authorization": {
+      "country": "IN",
+      "status": "citizen",
+      "requires_sponsorship": null,
+      "work_permit_expiry": null,
+      "source": "user_entered",
+      "confirmed_at": "2026-08-20T10:16:00Z"
+    },
+    "preferences": {
+      "desired_comp": { "amount": 4200000, "currency": "INR", "basis": "annual" },
+      "notice_period_days": 60,
+      "earliest_start": "2026-11-01",
+      "remote_preference": "hybrid",
+      "willing_to_relocate": false
+    },
+    "confirmations": {
+      "location": "2026-08-20T10:15:00Z",
+      "phone_e164": "2026-08-20T10:15:00Z",
+      "authorization": "2026-08-20T10:16:00Z"
+    },
+    "provenance": {
+      "confidence": "verified",
+      "source": "user_entered",
+      "confirmed_at": "2026-08-20T10:16:00Z",
+      "updated_at": "2026-08-20T10:16:00Z"
+    }
+  },
+
+  "ledger": {
+    "employment": [
+      {
+        "id": "emp_01",
+        "employer": "Meridian Payments",
+        "title": "Senior Backend Engineer",
+        "employment_type": "full_time",
+        "dates": { "start": "2023-07", "end": null },
+        "location": "Bengaluru, IN",
+        "summary": "Owned the checkout and settlement services behind a payments platform processing 4 million transactions per month.",
+        "achievements": [
+          {
+            "id": "ach_01_01",
+            "text": "Cut p99 checkout latency 42% by moving session state to Redis and removing a synchronous fraud-check call from the critical path.",
+            "skill_ids": ["sk_redis", "sk_python", "sk_perf"],
+            "metrics": ["42%"]
+          },
+          {
+            "id": "ach_01_02",
+            "text": "Led a four-engineer team through the migration of the settlement ledger from MySQL to PostgreSQL with zero downtime and no reconciliation errors across 11 million rows.",
+            "skill_ids": ["sk_postgres", "sk_mysql"],
+            "metrics": ["11 million"]
+          },
+          {
+            "id": "ach_01_03",
+            "text": "Drove cross-team adoption of a shared idempotency library across four product squads, convincing three tech leads who did not report to me by prototyping it against their own failure cases.",
+            "skill_ids": ["sk_python"],
+            "metrics": []
+          },
+          {
+            "id": "ach_01_04",
+            "text": "Wrote the postmortem for a 90-minute settlement outage caused by a silent schema drift, then instrumented the drift check that has caught two recurrences since.",
+            "skill_ids": ["sk_postgres"],
+            "metrics": ["90-minute"]
+          },
+          {
+            "id": "ach_01_05",
+            "text": "Mentored two junior engineers through their first on-call rotations and rewrote the runbook they kept getting stuck on.",
+            "skill_ids": [],
+            "metrics": []
+          }
+        ],
+        "provenance": {
+          "confidence": "verified",
+          "source": "parsed_resume",
+          "confirmed_at": "2026-08-20T10:22:00Z",
+          "updated_at": "2026-08-20T10:22:00Z"
+        },
+        "superseded_by": null
+      },
+      {
+        "id": "emp_02",
+        "employer": "Tessellate Labs",
+        "title": "Backend Engineer",
+        "employment_type": "full_time",
+        "dates": { "start": "2021-02", "end": "2023-06" },
+        "location": "Pune, IN",
+        "summary": "Second backend hire on a logistics analytics product; built the ingestion pipeline from scratch.",
+        "achievements": [
+          {
+            "id": "ach_02_01",
+            "text": "Built the event ingestion pipeline from scratch against an undefined spec, scaling it from 200 to 18,000 events per second over eighteen months.",
+            "skill_ids": ["sk_python", "sk_kafka", "sk_docker"],
+            "metrics": ["18,000"]
+          },
+          {
+            "id": "ach_02_02",
+            "text": "Containerized eleven services and automated the deploy pipeline, reducing release time from three hours of manual steps to an eight-minute CI run.",
+            "skill_ids": ["sk_docker", "sk_ci"],
+            "metrics": ["eight-minute"]
+          },
+          {
+            "id": "ach_02_03",
+            "text": "Instrumented the pipeline with per-stage metrics and used the data to deprioritize a planned rewrite that the numbers showed would have gained under 3%.",
+            "skill_ids": ["sk_python"],
+            "metrics": ["3%"]
+          }
+        ],
+        "provenance": {
+          "confidence": "verified",
+          "source": "parsed_resume",
+          "confirmed_at": "2026-08-20T10:24:00Z",
+          "updated_at": "2026-08-20T10:24:00Z"
+        },
+        "superseded_by": null
+      }
+    ],
+
+    "education": [
+      {
+        "id": "edu_01",
+        "institution": "Vellore Institute of Technology",
+        "degree": "B.Tech",
+        "field_of_study": "Computer Science",
+        "dates": { "start": "2014-08", "end": "2018-05" },
+        "gpa": null,
+        "honors": [],
+        "provenance": {
+          "confidence": "verified",
+          "source": "user_entered",
+          "confirmed_at": "2026-08-20T10:26:00Z",
+          "updated_at": "2026-08-20T10:26:00Z"
+        },
+        "superseded_by": null
+      }
+    ],
+
+    "projects": [
+      {
+        "id": "prj_01",
+        "name": "kvlite",
+        "role": "Author",
+        "summary": "A single-file embedded key-value store in Rust with an LSM-tree backend, built to understand compaction properly. 900 GitHub stars.",
+        "dates": { "start": "2024-01", "end": "2024-09" },
+        "skill_ids": ["sk_rust"],
+        "url": "https://github.com/adiraman/kvlite",
+        "employer_id": null,
+        "provenance": {
+          "confidence": "verified",
+          "source": "user_entered",
+          "confirmed_at": "2026-08-20T10:28:00Z",
+          "updated_at": "2026-08-20T10:28:00Z"
+        },
+        "superseded_by": null
+      },
+      {
+        "id": "prj_02",
+        "name": "Settlement replay tool",
+        "role": "Lead",
+        "summary": "Internal tool that replays a day of settlement traffic against a candidate build, which the team now runs before every release.",
+        "dates": { "start": "2025-03", "end": "2025-06" },
+        "skill_ids": ["sk_python", "sk_postgres"],
+        "url": null,
+        "employer_id": "emp_01",
+        "provenance": {
+          "confidence": "verified",
+          "source": "user_entered",
+          "confirmed_at": "2026-08-20T10:29:00Z",
+          "updated_at": "2026-08-20T10:29:00Z"
+        },
+        "superseded_by": null
+      }
+    ],
+
+    "credentials": []
+  },
+
+  "declared_skills": [
+    { "id": "sk_python", "name": "Python", "aliases": ["Python3"], "kind": "hard", "category": "language", "years": 5.5, "proficiency": "advanced", "evidence_ids": [] },
+    { "id": "sk_postgres", "name": "PostgreSQL", "aliases": ["Postgres", "psql"], "kind": "hard", "category": "database", "years": 3.0, "proficiency": "advanced", "evidence_ids": [] },
+    { "id": "sk_mysql", "name": "MySQL", "aliases": [], "kind": "hard", "category": "database", "years": 2.0, "proficiency": "working", "evidence_ids": [] },
+    { "id": "sk_redis", "name": "Redis", "aliases": [], "kind": "hard", "category": "infra", "years": 2.5, "proficiency": "working", "evidence_ids": [] },
+    { "id": "sk_kafka", "name": "Kafka", "aliases": ["Apache Kafka"], "kind": "hard", "category": "infra", "years": 2.0, "proficiency": "working", "evidence_ids": [] },
+    { "id": "sk_docker", "name": "Docker", "aliases": [], "kind": "hard", "category": "infra", "years": 3.0, "proficiency": "advanced", "evidence_ids": [] },
+    { "id": "sk_ci", "name": "CI/CD", "aliases": ["GitHub Actions"], "kind": "hard", "category": "tooling", "years": 3.0, "proficiency": "working", "evidence_ids": [] },
+    { "id": "sk_rust", "name": "Rust", "aliases": [], "kind": "hard", "category": "language", "years": 1.0, "proficiency": "working", "evidence_ids": [] },
+    { "id": "sk_perf", "name": "Performance tuning", "aliases": [], "kind": "hard", "category": "domain", "years": 3.0, "proficiency": "advanced", "evidence_ids": [] },
+    { "id": "sk_graphql", "name": "GraphQL", "aliases": [], "kind": "hard", "category": "tooling", "years": 1.0, "proficiency": "working", "evidence_ids": [] }
+  ],
+
+  "answer_memory": [
+    {
+      "id": "ans_01",
+      "canonical_question_id": "failure_example",
+      "raw_question": "Tell us about a time something went wrong and what you learned.",
+      "company_id": null,
+      "company_name": null,
+      "answer_text": "A schema drift between our staging and production settlement databases went unnoticed for three weeks and eventually caused a 90-minute outage during a batch run. I had reviewed the migration that introduced it and had not checked that it applied cleanly to both. I wrote the postmortem, then added an automated drift check to CI rather than a process reminder, because the failure was structural and not a matter of anyone remembering harder. It has caught two recurrences since.",
+      "char_count": 447,
+      "mode_used": "strict",
+      "evidence_ids_used": ["ach_01_04"],
+      "edited_by_user": true,
+      "original_generated_text": "At Meridian Payments I wrote the postmortem for a 90-minute settlement outage caused by silent schema drift, then instrumented the drift check that has caught two recurrences since.",
+      "approved_at": "2026-08-28T14:02:00Z",
+      "times_reused": 3,
+      "embedding": null
+    }
+  ]
+}
