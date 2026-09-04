@@ -94,8 +94,28 @@ export interface MemoryView {
   is_empty: boolean
 }
 
+/** What is actually on disk. `null` means storage is switched off, which is a
+ * supported configuration — and worth showing, because "my résumé disappeared
+ * after a restart" and "storage is off" are otherwise the same symptom. */
+export interface StorageInfo {
+  path: string
+  ledger_record: number
+  declared_skill: number
+  approved_answer: number
+  document: number
+  candidate: number
+}
+
+export interface Health {
+  status: string
+  phase: number
+  memory_empty: boolean
+  memory: MemoryStats
+  storage: StorageInfo | null
+}
+
 export const api = {
-  health: () => json<{ status: string; phase: number; memory: MemoryStats }>('/health'),
+  health: () => json<Health>('/health'),
   modes: () => json<ModeInfo[]>('/meta/modes'),
   competencies: () => json<CompetencyInfo[]>('/meta/competencies'),
   memory: () => json<MemoryView>('/memory'),

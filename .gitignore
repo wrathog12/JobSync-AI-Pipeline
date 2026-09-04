@@ -40,3 +40,9 @@ coverage/
 # Temporary
 tmp/
 *.tmp
+
+# Local database (SQLite, plus its WAL sidecars)
+*.db
+*.db-wal
+*.db-shm
+server/data/

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .config import get_settings
+from .db import close_db, get_db, open_db
+from .db import repository as store_db
 from .ingest import extract, extract_pasted, get_documents
 from .llm import Blame, LLMError, LLMQuotaError, get_client, has_server_key
 from .memory.candidates import get_candidates
@@ -37,10 +42,35 @@ class PasteRequest(BaseModel):
     text: str
     filename: str | None = None
 
+
+log = logging.getLogger("jobsync")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ANN201
+    """Open the database, restore memory, and put back any review in progress.
+
+    Loading happens through the module-level `get_store()` rather than the store
+    singleton, so a test that swaps it in still exercises this path instead of
+    quietly loading into an object nobody reads.
+    """
+    db = open_db(get_settings().db_path)
+    if db is not None:
+        found = store_db.load_all(get_store(), get_documents(), get_candidates(), db)
+        log.info(
+            "storage: %s (%s)", db.path, "restored existing memory" if found else "empty"
+        )
+    else:
+        log.warning("storage: disabled — nothing you confirm will survive a restart")
+    yield
+    close_db()
+
+
 app = FastAPI(
     title="JobSync Intelligence Layer",
     version="0.1.0",
     description="Phase 0 — memory schema, classification, retrieval, and traces.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -56,9 +86,23 @@ TRACES: list[Trace] = []
 MAX_TRACES = 200
 
 
+# ── persistence hooks ──────────────────────────────────────────────────────────
+#
+# Explicit calls at the few endpoints that change something, rather than a
+# write-through store. `MemoryStore` stays a plain object that tests can construct
+# and the pipeline can reason about, and the list of things that can write to disk
+# is exactly the list of things that can write to memory — visible in one file.
+
+
+def _persist_memory() -> None:
+    if (db := get_db()) is not None:
+        store_db.save_memory(get_store(), db)
+
+
 @app.get("/health")
 def health() -> dict:
     store = get_store()
+    db = get_db()
     return {
         "status": "ok",
         "phase": 0,
@@ -68,6 +112,9 @@ def health() -> dict:
         # the record counts.
         "memory_empty": store.is_empty,
         "memory": store.stats(),
+        # Reported, not assumed: "my résumé vanished after a restart" and "storage
+        # is off" are the same symptom, and only one of them is a bug.
+        "storage": store_db.stats(db) if db is not None else None,
     }
 
 
@@ -185,6 +232,10 @@ def load_demo() -> dict:
     """
     store = get_store()
     store.load_fixture()
+    # Saved, not just loaded in memory. `save_memory` mirrors the store, so the
+    # rows belonging to whoever was here before are pruned in the same transaction
+    # — otherwise the next restart would reload them alongside the fixture.
+    _persist_memory()
     return {"loaded": True, "memory_empty": store.is_empty, "memory": store.stats()}
 
 
@@ -193,6 +244,10 @@ def clear_memory() -> dict:
     """Wipe L0-L2 and the derived layers. The way out of a store holding a mix."""
     store = get_store()
     store.clear()
+    if (db := get_db()) is not None:
+        # Staged documents and candidates deliberately survive: they are not
+        # memory, and the usual reason to clear is to re-confirm the same résumé.
+        store_db.wipe_memory(db)
     return {"cleared": True, "memory_empty": store.is_empty, "memory": store.stats()}
 
 
@@ -261,6 +316,8 @@ async def upload_document(file: UploadFile = File(...)) -> dict:
     if not data:
         raise HTTPException(status_code=400, detail="Empty upload.")
     doc = get_documents().put(extract(data, file.filename))
+    if (db := get_db()) is not None:
+        store_db.save_document(doc, db)
     return _doc_view(doc)
 
 
@@ -268,6 +325,8 @@ async def upload_document(file: UploadFile = File(...)) -> dict:
 def paste_document(body: PasteRequest) -> dict:
     """The escape hatch for scans and exotic templates. Always works."""
     doc = get_documents().put(extract_pasted(body.text, body.filename))
+    if (db := get_db()) is not None:
+        store_db.save_document(doc, db)
     return _doc_view(doc)
 
 
@@ -286,6 +345,8 @@ def get_document(doc_id: str) -> dict:
 
 @app.delete("/ingest/documents/{doc_id}")
 def drop_document(doc_id: str) -> dict:
+    if (db := get_db()) is not None:
+        store_db.delete_document(doc_id, db)
     return {"dropped": get_documents().drop(doc_id)}
 
 
@@ -346,7 +407,12 @@ def structure(doc_id: str, api_key: str | None = None) -> dict:
             status_code=_llm_status(exc),
             detail={"blame": exc.blame.value, "message": exc.user_message()},
         ) from exc
-    return _structure_view(get_candidates().put(result))
+    stored = get_candidates().put(result)
+    if (db := get_db()) is not None:
+        # This one is worth money. A restart before the user finishes reviewing
+        # used to mean paying the model again to read the same document.
+        store_db.save_candidate(stored, db)
+    return _structure_view(stored)
 
 
 @app.get("/structure/{doc_id}")
@@ -365,6 +431,8 @@ def list_structures() -> list[dict]:
 @app.delete("/structure/{doc_id}")
 def drop_structure(doc_id: str) -> dict:
     """Discarding a review. The document stays; only the reading of it goes."""
+    if (db := get_db()) is not None:
+        store_db.delete_candidate(doc_id, db)
     return {"dropped": get_candidates().drop(doc_id)}
 
 
@@ -398,6 +466,10 @@ def confirm_candidate(req: ConfirmRequest) -> dict:
         result = confirm(req, candidate, get_store(), doc.text)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Unconditional, even when everything was rejected: a supersede can fire on a
+    # call that commits no new records, and a confirmation the user watched succeed
+    # and then lost to a restart is the worst thing this endpoint could do.
+    _persist_memory()
     return {
         **result.model_dump(mode="json"),
         "records_committed": result.records_committed,

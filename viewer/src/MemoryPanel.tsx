@@ -1,12 +1,14 @@
-import { api, type CompetencyInfo, type MemoryView } from './api'
+import { api, type CompetencyInfo, type MemoryView, type StorageInfo } from './api'
 
 export function MemoryPanel({
   memory,
   competencies,
+  storage,
   onChange,
 }: {
   memory: MemoryView | null
   competencies: CompetencyInfo[]
+  storage?: StorageInfo | null
   onChange?: () => void
 }) {
   if (!memory) return <div className="empty">Loading memory…</div>
@@ -45,6 +47,24 @@ export function MemoryPanel({
             Clear memory
           </button>
         </div>
+        {storage === null ? (
+          <div className="warnlist" style={{ marginTop: 10 }}>
+            Storage is off — nothing you confirm will survive a restart. Set{' '}
+            <code>DB_PATH</code> in <code>server/.env</code> to turn it on.
+          </div>
+        ) : (
+          storage && (
+            <div className="src" style={{ marginTop: 10 }}>
+              On disk at <code>{storage.path}</code>: {storage.ledger_record} ledger row
+              {storage.ledger_record === 1 ? '' : 's'}, {storage.declared_skill} skill
+              {storage.declared_skill === 1 ? '' : 's'}, {storage.approved_answer} approved answer
+              {storage.approved_answer === 1 ? '' : 's'}, {storage.document} document
+              {storage.document === 1 ? '' : 's'} and {storage.candidate} pending review
+              {storage.candidate === 1 ? '' : 's'}. The derived layers are absent on purpose —
+              they are rebuilt from the ledger on every start.
+            </div>
+          )
+        )}
       </div>
 
       <div className="card">

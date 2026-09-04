@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type CompetencyInfo, type GenerationModeName, type MemoryView, type ModeInfo } from './api'
+import {
+  api,
+  type CompetencyInfo,
+  type GenerationModeName,
+  type MemoryView,
+  type ModeInfo,
+  type StorageInfo,
+} from './api'
 import { IngestPanel } from './IngestPanel'
 import { MemoryPanel } from './MemoryPanel'
 import { ReviewPanel } from './ReviewPanel'
@@ -63,6 +70,8 @@ export default function App() {
   const [modes, setModes] = useState<ModeInfo[]>([])
   const [competencies, setCompetencies] = useState<CompetencyInfo[]>([])
   const [memory, setMemory] = useState<MemoryView | null>(null)
+  /** `undefined` = not asked yet, `null` = asked and storage is off. */
+  const [storage, setStorage] = useState<StorageInfo | null | undefined>(undefined)
 
   const [trace, setTrace] = useState<TraceView | null>(null)
   const [compared, setCompared] = useState<Record<GenerationModeName, TraceView> | null>(null)
@@ -75,11 +84,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    Promise.all([api.modes(), api.competencies(), api.memory(), api.documents()])
-      .then(([m, c, mem, docs]) => {
+    Promise.all([api.modes(), api.competencies(), api.memory(), api.documents(), api.health()])
+      .then(([m, c, mem, docs, h]) => {
         setModes(m)
         setCompetencies(c)
         setMemory(mem)
+        setStorage(h.storage)
         // Survive a page reload: the server still holds anything already extracted.
         if (docs.length) setDoc(docs[0])
       })
@@ -94,10 +104,13 @@ export default function App() {
    * — a stale competency list after a commit is how you end up debugging a
    * retrieval "bug" that is really a cached panel. */
   const refreshMemory = useCallback(() => {
-    Promise.all([api.memory(), api.competencies()])
-      .then(([mem, c]) => {
+    Promise.all([api.memory(), api.competencies(), api.health()])
+      .then(([mem, c, h]) => {
         setMemory(mem)
         setCompetencies(c)
+        // Health carries the on-disk counts, so a commit that reached memory but
+        // not the database is visible here instead of at the next restart.
+        setStorage(h.storage)
       })
       .catch((e) => setError(String(e)))
   }, [])
@@ -386,7 +399,12 @@ export default function App() {
       {tab === 'review' && <ReviewPanel doc={doc} onCommitted={refreshMemory} />}
 
       {tab === 'memory' && (
-        <MemoryPanel memory={memory} competencies={competencies} onChange={refreshMemory} />
+        <MemoryPanel
+          memory={memory}
+          competencies={competencies}
+          storage={storage}
+          onChange={refreshMemory}
+        />
       )}
 
       {tab === 'traces' &&

@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     """0 disables thinking on 2.5 Flash. Structuring and tagging do not need it,
     and on BYOK an invisible reasoning bill is a bad surprise."""
 
+    # ── storage ──
+    db_path: str = "data/jobsync.db"
+    """One SQLite file, relative to wherever the server is started.
+
+    `:memory:` gives a fresh private database per process — what the test suite
+    uses, so the persistence code still runs end to end. Empty disables storage
+    entirely, which is supported: memory then lives and dies with the process.
+    """
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
