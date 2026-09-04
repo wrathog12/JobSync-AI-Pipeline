@@ -44,7 +44,7 @@ Review of `Context.md` (the job-application Chrome Extension ideation) **plus th
 3. **Ingesting the whole corpus, not just the resume.** Projects, side work, education detail, skills — the resume is a lossy 1-page compression of the user. Applications ask questions the resume was never designed to answer. Ingesting the superset is right.
 4. **Query-per-question rather than stuff-everything.** Directionally right at scale, and — more importantly than you probably intended — it's a **privacy mechanism** (§3.8), which turns out to be the strongest argument for retrieval in this product.
 
-### 1.2 What's wrong about it
+### 1.2 What's wrong about it || this is the fourth architectural changes for no reason at all...
 
 | Claim | Verdict | Detail |
 |---|---|---|
