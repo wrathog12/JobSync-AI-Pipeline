@@ -29,7 +29,12 @@ from app.llm.base import (
 from app.llm.fake import FakeClient
 from app.llm.gemini import GeminiClient, _usage_of
 
-GOOD_KEY = "AIzaSyDUMMY_KEY_FOR_TESTS_0000000000000"
+#: Deliberately *not* prefixed "AIza". A real Google key starts that way, so a
+#: fake one that does too is indistinguishable to a secret scanner — GitGuardian
+#: blocks the push and the fix is a history rewrite. `resolve_key` only checks
+#: length, whitespace and the `sk-` prefix (see `llm/keys.py`), so dropping the
+#: prefix costs these tests nothing.
+GOOD_KEY = "not-a-real-key-0000000000000000000000000"
 
 
 class Extracted(BaseModel):
@@ -55,7 +60,7 @@ def settings(monkeypatch):
 
 
 def test_request_key_wins_over_server_key(settings):
-    settings(gemini_api_key="AIzaSERVER_KEY_0000000000000000000000")
+    settings(gemini_api_key="not-the-server-key-000000000000000000")
     assert keys_mod.resolve_key(GOOD_KEY) == GOOD_KEY
 
 
@@ -91,7 +96,7 @@ def test_blank_request_key_falls_through(settings):
     "bad, hint",
     [
         ("short", "single line"),
-        ("AIza with spaces in it 000000000000000", "single line"),
+        ("a key with spaces in it 00000000000000", "single line"),
         ("sk-proj-abcdefghijklmnopqrstuvwxyz", "OpenAI"),
     ],
 )
