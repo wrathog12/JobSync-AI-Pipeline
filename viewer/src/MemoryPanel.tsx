@@ -1,17 +1,72 @@
-import type { CompetencyInfo, MemoryView } from './api'
+import { api, type CompetencyInfo, type MemoryView, type StorageInfo } from './api'
 
 export function MemoryPanel({
   memory,
   competencies,
+  storage,
+  onChange,
 }: {
   memory: MemoryView | null
   competencies: CompetencyInfo[]
+  storage?: StorageInfo | null
+  onChange?: () => void
 }) {
   if (!memory) return <div className="empty">Loading memory…</div>
   const s = memory.stats
 
+  const swap = async (fn: () => Promise<unknown>) => {
+    await fn()
+    onChange?.()
+  }
+
   return (
     <div className="mem">
+      <div className="card wide">
+        <h3>Whose memory is this?</h3>
+        {memory.is_empty ? (
+          <div className="src">
+            Empty — nothing has been confirmed yet, which is the correct starting state. Ingest
+            your résumé and confirm it on <strong>Review &amp; confirm</strong>, or load the demo
+            profile to see retrieval work against someone else's career first.
+          </div>
+        ) : (
+          <div className="src">
+            Holding {s.employment_records} job{s.employment_records === 1 ? '' : 's'} and{' '}
+            {s.evidence_chunks} evidence chunks
+            {s.identity_locked ? ', with a locked identity' : ''}. If any of it is the demo
+            profile's, clear it before confirming your own — the L0 lock will otherwise refuse
+            your name in defence of a fictional person, and the ledger is append-only, so both
+            people's jobs end up retrievable.
+          </div>
+        )}
+        <div className="actions" style={{ paddingTop: 10 }}>
+          <button className="btn ghost" onClick={() => swap(api.loadDemo)}>
+            Load the demo profile
+          </button>
+          <button className="btn ghost" onClick={() => swap(api.clearMemory)}>
+            Clear memory
+          </button>
+        </div>
+        {storage === null ? (
+          <div className="warnlist" style={{ marginTop: 10 }}>
+            Storage is off — nothing you confirm will survive a restart. Set{' '}
+            <code>DB_PATH</code> in <code>server/.env</code> to turn it on.
+          </div>
+        ) : (
+          storage && (
+            <div className="src" style={{ marginTop: 10 }}>
+              On disk at <code>{storage.path}</code>: {storage.ledger_record} ledger row
+              {storage.ledger_record === 1 ? '' : 's'}, {storage.declared_skill} skill
+              {storage.declared_skill === 1 ? '' : 's'}, {storage.approved_answer} approved answer
+              {storage.approved_answer === 1 ? '' : 's'}, {storage.document} document
+              {storage.document === 1 ? '' : 's'} and {storage.candidate} pending review
+              {storage.candidate === 1 ? '' : 's'}. The derived layers are absent on purpose —
+              they are rebuilt from the ledger on every start.
+            </div>
+          )
+        )}
+      </div>
+
       <div className="card">
         <h3>Layers</h3>
         <dl className="kv">

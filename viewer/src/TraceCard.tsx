@@ -2,6 +2,7 @@ import type { TraceView } from './types.generated'
 
 const STAGE_LABEL: Record<string, string> = {
   classify: 'classify',
+  session_replay: 'session replay (L6)',
   answer_memory: 'answer memory (L5)',
   retrieve: 'retrieve (L3)',
   rerank: 'rerank',
@@ -109,8 +110,23 @@ export function TraceCard({ trace, open = false }: { trace: TraceView; open?: bo
           </>
         )}
 
+        {trace.spent_chunks_avoided.length > 0 && (
+          <div className="stage">
+            <div className="name">avoided (L6)</div>
+            <div className="st skipped">spent</div>
+            <div className="detail">
+              {trace.spent_chunks_avoided.join(', ')} — already used elsewhere in this application
+            </div>
+          </div>
+        )}
+
         <div className="footer">
           <span>{trace.trace_id}</span>
+          {trace.session_id && (
+            <span>
+              {trace.session_id} · page {trace.page_index}
+            </span>
+          )}
           <span>{trace.total_ms} ms total</span>
           <span>
             {trace.total_tokens} tokens

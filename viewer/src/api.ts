@@ -1,13 +1,39 @@
-import type { AnswerRequest, TraceView } from './types.generated'
+import type {
+  AnswerRequest,
+  ApplicationSession,
+  ConfirmRequest,
+  ConfirmView,
+  DocumentView,
+  StructureView,
+  TraceView,
+} from './types.generated'
 
 const BASE = '/api'
+
+/** FastAPI puts everything useful in `detail`, and the LLM errors put a `blame`
+ * and a written explanation inside that. Throwing the status line alone would
+ * turn "that API key was rejected, copy it again" into "400 Bad Request". */
+async function errorFrom(res: Response, path: string): Promise<Error> {
+  let detail: unknown
+  try {
+    detail = (await res.json())?.detail
+  } catch {
+    /* not JSON — fall through to the status line */
+  }
+  if (typeof detail === 'string') return new Error(detail)
+  if (detail && typeof detail === 'object' && 'message' in detail) {
+    const d = detail as { message: string; blame?: string }
+    return new Error(d.blame ? `${d.message} (${d.blame})` : d.message)
+  }
+  return new Error(`${res.status} ${res.statusText} on ${path}`)
+}
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} on ${path}`)
+  if (!res.ok) throw await errorFrom(res, path)
   return res.json() as Promise<T>
 }
 
@@ -64,13 +90,41 @@ export interface MemoryView {
   skills: Array<{ id: string; name: string; evidence_ids: string[]; years: number | null; proficiency: string | null }>
   evidence: EvidenceView[]
   stats: MemoryStats
+  /** True until you confirm something. Not the same as "still loading". */
+  is_empty: boolean
+}
+
+/** What is actually on disk. `null` means storage is switched off, which is a
+ * supported configuration — and worth showing, because "my résumé disappeared
+ * after a restart" and "storage is off" are otherwise the same symptom. */
+export interface StorageInfo {
+  path: string
+  ledger_record: number
+  declared_skill: number
+  approved_answer: number
+  document: number
+  candidate: number
+}
+
+export interface Health {
+  status: string
+  phase: number
+  memory_empty: boolean
+  memory: MemoryStats
+  storage: StorageInfo | null
 }
 
 export const api = {
-  health: () => json<{ status: string; phase: number; memory: MemoryStats }>('/health'),
+  health: () => json<Health>('/health'),
   modes: () => json<ModeInfo[]>('/meta/modes'),
   competencies: () => json<CompetencyInfo[]>('/meta/competencies'),
   memory: () => json<MemoryView>('/memory'),
+
+  // Both destructive and both explicit. The demo profile used to load itself on
+  // first read, which put a fictional person's locked identity in the way of the
+  // real user's own name.
+  loadDemo: () => json<{ loaded: boolean }>('/memory/demo', { method: 'POST' }),
+  clearMemory: () => json<{ cleared: boolean }>('/memory', { method: 'DELETE' }),
   traces: () => json<TraceView[]>('/traces'),
 
   answer: (req: AnswerRequest) =>
@@ -81,4 +135,50 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+
+  // ── L6 sessions: one application, many pages ──
+  startSession: (body: { jd_text?: string | null; mode?: GenerationModeName; company?: string | null }) =>
+    json<ApplicationSession>('/sessions', { method: 'POST', body: JSON.stringify(body) }),
+
+  session: (id: string) => json<ApplicationSession>(`/sessions/${id}`),
+
+  nextPage: (id: string) =>
+    json<ApplicationSession>(`/sessions/${id}/next-page`, { method: 'POST' }),
+
+  endSession: (id: string) =>
+    json<{ dropped: boolean }>(`/sessions/${id}`, { method: 'DELETE' }),
+
+  // ── ingest: documents in, text out ──
+  upload: async (file: File) => {
+    // No Content-Type header: the browser must set the multipart boundary itself,
+    // and `json()` would override it with application/json.
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch(`${BASE}/ingest/upload`, { method: 'POST', body })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} on /ingest/upload`)
+    return (await res.json()) as DocumentView
+  },
+
+  paste: (text: string, filename?: string) =>
+    json<DocumentView>('/ingest/paste', {
+      method: 'POST',
+      body: JSON.stringify({ text, filename: filename ?? null }),
+    }),
+
+  documents: () => json<DocumentView[]>('/ingest/documents'),
+
+  // ── step 3: read a document into candidate records. Writes nothing. ──
+  structure: (docId: string) =>
+    json<StructureView>(`/structure/${docId}`, { method: 'POST' }),
+
+  candidate: (docId: string) => json<StructureView>(`/structure/${docId}`),
+
+  candidates: () => json<StructureView[]>('/structure'),
+
+  discardCandidate: (docId: string) =>
+    json<{ dropped: boolean }>(`/structure/${docId}`, { method: 'DELETE' }),
+
+  // ── step 4: the only thing that writes to L0/L1/L2 ──
+  confirm: (req: ConfirmRequest) =>
+    json<ConfirmView>('/confirm', { method: 'POST', body: JSON.stringify(req) }),
 }

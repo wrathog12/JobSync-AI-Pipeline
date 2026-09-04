@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.memory.store import get_store
+from app.memory.store import get_demo_store
 from app.pipeline.answer import run
 from app.pipeline.classify import classify
 from app.schemas.common import GenerationMode
@@ -74,7 +74,7 @@ def test_classifier_routes_to_attestation(label: str) -> None:
 @pytest.mark.parametrize("mode", list(GenerationMode))
 def test_zero_attestation_fields_ever_answered(label: str, mode: GenerationMode) -> None:
     """The non-negotiable invariant. No mode, ever, may fill one of these."""
-    trace = run(AnswerRequest(question=label, mode=mode, max_chars=500), get_store())
+    trace = run(AnswerRequest(question=label, mode=mode, max_chars=500), get_demo_store())
     assert trace.field.field_class is FieldClass.ATTESTATION
     assert trace.abstained is True
     assert trace.answer is None, f"{mode.value} filled an attestation field: {label!r}"

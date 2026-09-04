@@ -15,6 +15,7 @@ from __future__ import annotations
 from ..schemas.field import ClassifiedField, FieldClass, FieldType, FormField
 from ..taxonomy import attestation
 from ..taxonomy import canonical_questions as cq
+from ..taxonomy import competencies as comp_tax
 
 #: Below this, the alias hit is not trusted and we fall through.
 ALIAS_FLOOR = 0.55
@@ -41,6 +42,11 @@ def classify(field: FormField) -> ClassifiedField:
 
     # ── Tier 2: alias dictionary ──
     if resolved and confidence >= ALIAS_FLOOR:
+        # Curated tags win outright; hints are NOT unioned in here. Tried that,
+        # and it took "led a team through a difficult migration" from 3 tags to 8
+        # ("difficult", "team" and "migrate" each contributing), which widened the
+        # competency prefilter until it stopped filtering. That prefilter being
+        # narrow is the entire fix for lexical ranking returning the worst chunk.
         return ClassifiedField(
             **field.model_dump(),
             field_class=resolved.field_class,
@@ -58,12 +64,18 @@ def classify(field: FormField) -> ClassifiedField:
         (field.constraints.max_chars or 0) >= PROSE_MIN_CHARS
     )
     if looks_like_prose:
+        # Tags do NOT require a canonical match. Without this an unrecognised
+        # behavioural question reaches retrieval with nothing to filter on, falls
+        # back to raw BM25, and abstains on evidence the profile plainly has.
+        # Tags only widen retrieval — the sufficiency gate still has final say —
+        # so being generous here is safe in a way that guessing an ID is not.
+        hints = _hints(field.context_label)
         return ClassifiedField(
             **field.model_dump(),
             field_class=FieldClass.GENERATIVE,
-            competency_tags=[],
-            classified_via="heuristic_prose",
-            classifier_confidence=0.35,
+            competency_tags=hints,
+            classified_via="heuristic_prose" if not hints else "competency_hints",
+            classifier_confidence=0.35 if not hints else 0.45,
         )
 
     return ClassifiedField(
@@ -72,6 +84,11 @@ def classify(field: FormField) -> ClassifiedField:
         classified_via="fail_closed",
         classifier_confidence=0.0,
     )
+
+
+def _hints(label: str) -> list[str]:
+    """Competency tags from question wording, via the same stemmer the aliases use."""
+    return comp_tax.competency_hints(cq.content_stems(label))
 
 
 def why_blocked(field: ClassifiedField) -> str | None:

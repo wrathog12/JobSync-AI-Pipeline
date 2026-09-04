@@ -336,7 +336,7 @@ export interface GroundingViolation {
 
 export type LimitUnit = "chars" | "words" | "sentences";
 
-export type Stage = "classify" | "answer_memory" | "retrieve" | "rerank" | "sufficiency_gate" | "generate" | "length_repair" | "ground_check";
+export type Stage = "classify" | "session_replay" | "answer_memory" | "retrieve" | "rerank" | "sufficiency_gate" | "generate" | "length_repair" | "ground_check";
 
 export type StageStatus = "ok" | "hit" | "miss" | "skipped" | "abstained" | "stub" | "failed";
 
@@ -360,6 +360,10 @@ export interface Trace {
   mode: GenerationMode;
   field: ClassifiedField;
   jd_excerpt: string | null;
+  session_id: string | null;
+  field_key: string | null;
+  page_index: number;
+  spent_chunks_avoided: string[];
   steps: TraceStep[];
   /** None when the system abstained. */
   answer: string | null;
@@ -380,6 +384,137 @@ export interface AnswerRequest {
   jd_text: string | null;
   max_chars: number | null;
   field_type: string;
+  session_id: string | null;
+  regenerate: boolean;
+}
+
+/** One field this session has already answered, keyed for idempotent replay. */
+export interface AnsweredField {
+  /** Stable identity of the field across page reloads. See `field_key()`. */
+  field_key: string;
+  question: string;
+  answer: string | null;
+  abstained: boolean;
+  mode: GenerationMode;
+  trace_id: string;
+  used_chunks: string[];
+  page_index: number;
+  /** Only an approved answer may ever be promoted into L5. */
+  approved_by_user: boolean;
+  answered_at: string;
+}
+
+/** L6. Scratch space for one application. Never a source of truth about the user. */
+export interface ApplicationSession {
+  session_id: string;
+  created_at: string;
+  company: string | null;
+  role_title: string | null;
+  /** e.g. 'company.wd5.myworkdayjobs.com' — part of the session key. */
+  origin: string | null;
+  jd_text: string | null;
+  jd_fingerprint: string | null;
+  mode: GenerationMode;
+  page_index: number;
+  pages_seen: string[];
+  answered: AnsweredField[];
+  spent_chunks: Record<string, number>;
+  stretches: ClaimStretch[];
+}
+
+export type WarningCode = "no_text_layer" | "encrypted" | "too_short" | "unsupported_type" | "corrupt" | "multi_column" | "many_pages" | "garbled";
+
+/** A problem worth showing the user, in their words rather than ours. */
+export interface ExtractionWarning {
+  code: WarningCode;
+  /** User-facing. Says what to do, not just what broke. */
+  message: string;
+  /** True => structuring must not run. The text is unusable, not just suspect. */
+  blocking: boolean;
+}
+
+export type DocumentKind = "pdf" | "docx" | "text" | "pasted";
+
+export type Layout = "single_column" | "multi_column" | "unknown";
+
+/** Extracted text plus everything we know about how well the extraction went. */
+export interface RawDocument {
+  doc_id: string;
+  kind: DocumentKind;
+  filename: string | null;
+  text: string;
+  /** 0 for non-paged input. */
+  page_count: number;
+  layout: Layout;
+  warnings: ExtractionWarning[];
+  /** Of the ORIGINAL bytes. Re-uploading the same file is a no-op, so a user who clicks twice does not get two candidate profiles to reconcile. */
+  sha256: string;
+  extracted_at: string;
+}
+
+export type StructureWarningCode = "quote_not_found" | "date_unparseable" | "date_imprecise" | "date_reversed" | "no_name" | "no_employment" | "multiple_current" | "authorization_mentioned" | "unknown_project_employer" | "truncated";
+
+export interface StructureWarning {
+  code: StructureWarningCode;
+  message: string;
+  record_id: string | null;
+}
+
+/** Candidate memory, built but not committed. */
+export interface StructureResult {
+  doc_id: string;
+  identity: Identity | null;
+  profile: Profile | null;
+  ledger: Ledger;
+  skills: string[];
+  headline: string | null;
+  summary: string | null;
+  languages: string[];
+  warnings: StructureWarning[];
+  model: string;
+  prompt_tokens: number;
+  output_tokens: number;
+  thinking_tokens: number;
+  ms: number;
+}
+
+export interface Rejection {
+  record_id: string;
+  reason: string;
+}
+
+/** Per-record consent. Nothing is accepted by omission or by default. */
+export interface ConfirmRequest {
+  doc_id: string;
+  /** The candidate set as the user edited it. Compared against the server's copy. */
+  result: StructureResult;
+  /** Ledger record ids to commit. Anything not listed is discarded. */
+  accept_record_ids: string[];
+  accept_profile_paths: string[];
+  accept_skills: string[];
+  confirm_identity: boolean;
+  /** Required to overwrite a locked L0. Names change; silent overwrites are not how. */
+  unlock_identity: boolean;
+  /** New record id -> the existing record it corrects. The old one is kept. */
+  supersedes: Record<string, string>;
+}
+
+export interface ConfirmResult {
+  doc_id: string;
+  employment_committed: number;
+  education_committed: number;
+  projects_committed: number;
+  credentials_committed: number;
+  achievements_committed: number;
+  achievements_user_authored: number;
+  skills_committed: number;
+  profile_paths_committed: string[];
+  identity_committed: boolean;
+  identity_locked: boolean;
+  superseded: string[];
+  skipped_existing: string[];
+  rejections: Rejection[];
+  evidence_chunks: number;
 }
 
 /** What GET /traces actually returns: Trace plus computed totals. */
@@ -387,4 +522,27 @@ export interface TraceView extends Trace {
   total_ms: number;
   total_tokens: number;
   cached_tokens: number;
+}
+
+/** What the /ingest endpoints return: RawDocument plus computed counts. */
+export interface DocumentView extends RawDocument {
+  char_count: number;
+  word_count: number;
+  line_count: number;
+  is_usable: boolean;
+}
+
+/** What the /structure endpoints return: StructureResult plus counts. */
+export interface StructureView extends StructureResult {
+  record_count: number;
+  achievement_count: number;
+  /** Achievements not found in the source. Non-zero means review carefully. */
+  unverified_quotes: number;
+  blocking: StructureWarning[];
+}
+
+/** What POST /confirm returns: ConfirmResult plus the resulting memory stats. */
+export interface ConfirmView extends ConfirmResult {
+  records_committed: number;
+  memory: Record<string, unknown>;
 }
