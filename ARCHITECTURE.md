@@ -1,5 +1,11 @@
 # Architecture & Feasibility Analysis — Rev 2
 
+> **Orientation.** This is the design review the project was built from, kept as
+> written on 2026-08-25. It explains *why* the six-layer memory, the verbatim
+> guard and the attestation deny-list exist — the reasoning behind them is still
+> the reasoning in force. It is not a description of the current code: for what
+> is actually built and what isn't, see `STATUS.md`; to run it, see `README.md`.
+
 Review of `Context.md` (the job-application Chrome Extension ideation) **plus the retrieval/knowledge-base addendum.**
 
 **Date:** 2026-08-25
