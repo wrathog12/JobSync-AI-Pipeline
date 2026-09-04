@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>JobSync</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>JobSync</h1>
+      <span id="status" class="chip">checking…</span>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <div class="bar">
+      <button id="scan" class="btn">Scan this page</button>
+      <button id="answerAll" class="btn ghost" disabled>Answer all</button>
+      <button id="settingsToggle" class="btn ghost icon" title="Settings">⚙</button>
+    </div>
+
+    <form id="settings" class="settings" hidden>
+      <label for="backend">Backend</label>
+      <input id="backend" type="url" spellcheck="false" />
+      <label for="mode">Mode</label>
+      <select id="mode">
+        <option value="strict">strict — only what your evidence supports</option>
+        <option value="optimize">optimize — frames it well</option>
+        <option value="aggressive">aggressive — stretches, and shows you where</option>
+      </select>
+      <button class="btn" type="submit">Save</button>
+    </form>
+
+    <p id="empty" class="empty">
+      Open a job application, then scan. Fields are read from every frame, since
+      Greenhouse and Lever forms are usually embedded in one.
+    </p>
+
+    <ul id="fields" class="fields"></ul>
+
+    <footer>
+      <span id="page" class="muted"></span>
+      <button id="endSession" class="link" hidden>End application</button>
+    </footer>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>
