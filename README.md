@@ -137,3 +137,4 @@ runs on `localhost` and the extension is hard-wired to it.
 
 None of this is an oversight — it's a deliberately scoped first version. The full
 list of what's missing, and the order it should be fixed in, is in `STATUS.md`.
+Note :- the scraper hasn't been tested through, please fix it for your domain.
