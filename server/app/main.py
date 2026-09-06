@@ -18,6 +18,7 @@ from .memory.candidates import get_candidates
 from .memory.sessions import get_sessions
 from .memory.store import get_store
 from .pipeline import answer as answer_pipeline
+from .pipeline import edit as edit_memory
 from .pipeline.confirm import ConfirmRequest, confirm
 from .pipeline.structure import structure_document
 from .schemas.common import MODE_DESCRIPTION, MODE_MAX_CLAIM_DISTANCE, GenerationMode
@@ -49,6 +50,12 @@ class JdUpdate(BaseModel):
 class PasteRequest(BaseModel):
     text: str
     filename: str | None = None
+
+
+class SkillWrite(BaseModel):
+    """Adding a skill and renaming one take the same body: just the name."""
+
+    name: str = Field(max_length=80)
 
 
 log = logging.getLogger("jobsync")
@@ -276,6 +283,117 @@ def clear_memory() -> dict:
         # memory, and the usual reason to clear is to re-confirm the same résumé.
         store_db.wipe_memory(db)
     return {"cleared": True, "memory_empty": store.is_empty, "memory": store.stats()}
+
+
+# ── editing memory by hand ─────────────────────────────────────────────────────
+#
+# Until these existed the API could add records and wipe everything, with nothing
+# in between: one misread job title meant clearing all of memory and re-uploading
+# the résumé. See `pipeline/edit.py` for why an edit appends rather than mutates.
+
+
+def _edited(payload: dict) -> dict:
+    """Save, then answer with the payload plus fresh stats.
+
+    Persisting here rather than in each endpoint keeps "changed memory" and "wrote
+    to disk" the same line of code — an edit the user watched succeed and then lost
+    to a restart is the worst thing this group of endpoints could do.
+    """
+    _persist_memory()
+    return {**payload, "memory": get_store().stats()}
+
+
+def _refuse(exc: edit_memory.EditError) -> HTTPException:
+    return HTTPException(status_code=exc.status, detail=exc.message)
+
+
+@app.patch("/memory/identity")
+def patch_identity(body: edit_memory.IdentityPatch, unlock: bool = False) -> dict:
+    """Set or correct the legal name. Locked afterwards; changing it needs `unlock`."""
+    try:
+        identity = edit_memory.edit_identity(body, get_store(), unlock=unlock)
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"identity": identity.model_dump(mode="json")})
+
+
+@app.patch("/memory/profile")
+def patch_profile(body: edit_memory.ProfilePatch) -> dict:
+    """Contact details, links, work authorization and preferences.
+
+    Authorization and preferences can *only* be set here. A résumé does not state
+    them, so `/confirm` refuses them — but they have to be enterable somewhere, and
+    by hand is the only honest way in.
+    """
+    try:
+        profile = edit_memory.edit_profile(body, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"profile": profile.model_dump(mode="json")})
+
+
+@app.patch("/memory/records/{record_id}")
+def patch_record(record_id: str, body: edit_memory.RecordPatch) -> dict:
+    """Correct one ledger record. The old one is kept, flagged, out of retrieval.
+
+    The response carries both ids because the corrected record is a *new* record —
+    a client holding the old id needs to know what replaced it rather than
+    discovering on its next request that the thing it was editing is inactive.
+    """
+    try:
+        old, new = edit_memory.edit_record(record_id, body, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited(
+        {
+            "record": new.model_dump(mode="json"),
+            "superseded": old.id,
+            "evidence_chunks": len(get_store().evidence.chunks),
+        }
+    )
+
+
+@app.delete("/memory/records/{record_id}")
+def retract_record(record_id: str) -> dict:
+    """Take a record out of retrieval. Not a delete — nothing is removed from disk."""
+    try:
+        record = edit_memory.retract_record(record_id, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited(
+        {
+            "retracted": record.id,
+            "evidence_chunks": len(get_store().evidence.chunks),
+        }
+    )
+
+
+@app.post("/memory/skills")
+def create_skill(body: SkillWrite) -> dict:
+    try:
+        skill = edit_memory.add_skill(body.name, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"skill": skill.model_dump(mode="json")})
+
+
+@app.patch("/memory/skills/{skill_id}")
+def patch_skill(skill_id: str, body: SkillWrite) -> dict:
+    """Fix a typo. `Pyhton` never matches a JD's `Python`, and nothing looks wrong."""
+    try:
+        skill = edit_memory.rename_skill(skill_id, body.name, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"skill": skill.model_dump(mode="json")})
+
+
+@app.delete("/memory/skills/{skill_id}")
+def delete_skill(skill_id: str) -> dict:
+    try:
+        skill = edit_memory.remove_skill(skill_id, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"removed": skill.id})
 
 
 @app.post("/answer")
