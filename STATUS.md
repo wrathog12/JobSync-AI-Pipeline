@@ -1,8 +1,8 @@
 # Status
 
-Where the project actually is. Updated 2026-09-04.
+Where the project actually is. Updated 2026-09-07.
 
-Tests: **432 backend** (`server/`), **31 extension** (`extension/`). All passing.
+Tests: **446 backend** (`server/`), **72 extension** (`extension/`). All passing.
 
 The rule for this file: a thing is *done* only if it works end to end and has a
 test that would fail if it broke. Everything else is in "Not done", even if code
@@ -86,11 +86,21 @@ A four-tier cascade in `pipeline/classify.py`, cheapest first:
 
 ### Persistence
 
-One SQLite file (`server/data/jobsync.db`). Layers L0–L2, L5 and staged
-documents are stored; L3/L4 are rebuilt. A save makes the database *match* the
+One SQLite file (`server/data/jobsync.db`). Layers L0–L2, L5, staged documents
+and L6 sessions are stored; L3/L4 are rebuilt. A save makes the database *match* the
 store exactly, including deleting rows the store no longer holds — otherwise
 loading a different profile leaves the previous person's employment behind, and a
 restart resurrects them next to the real ones. There's a test for exactly that.
+
+**Sessions persist too** (migration v2). They are not memory and are never merged
+into it, but a session holds the job description you pasted, every answer already
+given, and the spent-evidence counter that stops page 6 retelling page 2's story
+— half an hour of work that a restart used to delete. `jd_fingerprint` is a real
+column because reattaching after navigation looks a session up by it: Workday's
+URL changes on every wizard step.
+
+Every restart test uses a fresh store *and* a real file on disk. Reusing the
+in-process singletons is how you ship a persistence layer that persists nothing.
 
 ### Extension
 
@@ -101,10 +111,29 @@ restart resurrects them next to the real ones. There's a test for exactly that.
   Workday, Ashby and hand-rolled React forms emit. This is the load-bearing part:
   `context_label` is the entire interface to the backend, and a bad label routes a
   real question to ATTESTATION and abstains.
+- **The scan follows ARIA roles, not tag names.** Google Forms, Microsoft Forms
+  and most React design systems build radios, checkboxes and dropdowns out of
+  `<div role="…">` — a scan restricted to `input, textarea, select` returns *zero*
+  fields on an eight-question Google Form. Roles are the contract a form has to
+  honour for a screen reader, so anything a blind user can fill, the scan finds.
+- **Shadow DOM is crossed**, including for id lookups (`getRootNode()`), because
+  Workday and Salesforce design systems put their inputs in open shadow roots.
+- **Choices are filled by clicking, then read back.** There is no way to "set" a
+  div radio, and setting `.checked` on a native one leaves the framework unaware.
+  So: click, poll for the state to change, and say so when it never does — never
+  claim an answer the page did not accept. Matching is word-level rather than
+  substring, because "no" is a substring of "Not applicable".
+- Radio groups, checkbox groups (multi-select), native `<select>` and div
+  comboboxes, plus a lone checkbox treated as yes/no.
+- **The job description is read off the page** (`src/jd.js`): JSON-LD `JobPosting`
+  first — the site promised that one to Google — then known platform containers,
+  then text density discounting link text. Finding nothing is an explicit outcome
+  you can see in the popup, and you can paste the JD by hand instead.
 - Scan, per-field fill, highlight-on-click, one session per tab.
 - React-safe writes via the prototype `value` setter plus a bubbling `input`
   event — assigning `.value` directly updates the pixels and nothing else.
-- Attestation fields get no fill button.
+- Attestation fields get no fill button, and `fill` refuses them a second time at
+  the point of the write.
 
 ### Viewer
 
@@ -148,21 +177,22 @@ has a `NOTE` entity type (`schemas/evidence.py:28`); the L2 side doesn't exist.
 
 ### Extension gaps
 
-- **Radio groups are scanned but never filled** — refused on purpose, since a
-  radio is usually a consent or an attestation. Whether that's the right call for
-  ordinary multiple-choice questions is untested.
-- **Multi-select isn't found at all.** Most ATS "multi-selects" aren't
-  `<select multiple>` — they're a React combobox built from divs with a hidden
-  input. The scan looks for `input, textarea, select` and sees nothing.
+- **No LLM fallback for labelling.** When the DOM cascade cannot explain a field,
+  the field is dropped. The plan is a pruned HTML skeleton sent to a new backend
+  endpoint and cached, so the model reads the page the way a person would. Until
+  then, a form that labels its questions only visually — by position, colour, or a
+  heading it never associates — is invisible to the scan.
 - **File uploads are skipped.** A value assignment cannot attach bytes, by design.
-- **No JD capture** — sessions are created with `jd_text: null`, so answers aren't
-  tailored to the specific posting.
 - **No per-field edit box**, which means nothing flows back to L5. The
   answer-memory flywheel isn't turning.
-- **Workday's shadow DOM** is out of reach of the current scan.
-- **Visibility checking is untested in a real browser.** jsdom does no layout, so
-  the test harness fakes `offsetParent` and bounding rects. The tests can't tell
-  you whether `isVisible` behaves on a real page.
+- **A JD behind a login is unreachable.** If the posting lives on a page the
+  extension never sees, `source` comes back `none` and you paste it by hand. That
+  is the honest outcome rather than a bug, but it is still a manual step.
+- **Everything DOM-facing is tested in jsdom, which does no layout.** The harness
+  fakes `offsetParent` and bounding rects, and simulates the framework that reacts
+  to a click. The tests say the logic is right; only a real browser says the page
+  agrees. Radio, multi-select and dropdown behaviour on live forms is being
+  checked by hand.
 - **No icons** — Chrome shows a grey puzzle piece.
 
 ### Retrieval and quality
@@ -193,6 +223,10 @@ has a `NOTE` entity type (`schemas/evidence.py:28`); the L2 side doesn't exist.
   manual, every time.
 - **Résumé and cover-letter generation.** The actual output artifact of the whole
   project, and it doesn't exist yet.
+- **Traces are not stored.** `TRACES` is an in-process list capped at 200, so the
+  explanation of why an answer came out the way it did dies with the process. Less
+  urgent than it sounds — a trace is a debugging aid, not the user's work — but it
+  means yesterday's application cannot be looked at.
 
 ### Going public
 
@@ -219,7 +253,8 @@ Not blockers for your own use; all of them blockers for anyone else's.
 
 1. **The three screens, locally.** Still single-user, still your machine. Get the
    upload/edit loop pleasant before adding anything underneath it.
-2. **Radio and multi-select handling**, with manual testing against real forms.
+2. **The LLM labelling fallback**, for the forms the DOM cascade cannot explain,
+   plus whatever the manual testing of radio and multi-select turns up.
 3. **Real generation** — replace `_generate_stub`. Everything downstream of it is
    already built and waiting.
 4. **LLM competency tagger** and skill canonicalisation, together — they're the

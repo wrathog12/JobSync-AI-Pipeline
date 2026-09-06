@@ -14,10 +14,22 @@ declines rather than invents when it can't.
 1. You upload your CV and project documents once.
 2. You review what it extracted and confirm it, item by item. Nothing enters
    memory unconfirmed.
-3. On a job application, you click the extension. It reads the form, works out
-   what each field is asking, and answers from your memory.
+3. On a job application, you click the extension. It reads the job description
+   off the page, reads the form, works out what each field is asking, and answers
+   from your memory.
 4. **Nothing is written to the page until you click fill on that field.**
    Generating and filling are two separate actions on purpose.
+
+It finds the questions by their ARIA roles rather than their tags, so a form built
+entirely out of `<div>`s — Google Forms, Microsoft Forms, most React design
+systems — is read the same as one built out of `<input>`s. Text boxes, radio
+groups, checkbox groups, dropdowns. A choice is filled by clicking it and then
+reading the page back: if the page does not confirm the click, it tells you so
+instead of claiming the answer went in.
+
+If the description isn't on the page — behind a login, or on a wizard step you
+already passed — the popup says so and you can paste it in. Answers are written
+against the posting, so this is worth doing.
 
 Fields it won't answer at all: sponsorship status, work authorisation, veteran
 status, disability, criminal history, and anything else where a wrong answer is a
@@ -103,8 +115,8 @@ writes to memory — until you do, the extension will keep saying memory is empt
 ## Running the tests
 
 ```bash
-cd server && .venv/Scripts/python.exe -m pytest -q    # 432 tests
-cd extension && npm test                              # 31 tests
+cd server && .venv/Scripts/python.exe -m pytest -q    # 446 tests
+cd extension && npm test                              # 72 tests
 ```
 
 ---
