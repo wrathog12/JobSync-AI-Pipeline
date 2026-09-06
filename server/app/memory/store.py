@@ -149,7 +149,7 @@ class MemoryStore:
             "employment_records": len(self.ledger.active_employment()),
             "education_records": len([e for e in self.ledger.education if e.is_active]),
             "project_records": len([p for p in self.ledger.projects if p.is_active]),
-            "credential_records": len(self.ledger.credentials),
+            "credential_records": len([c for c in self.ledger.credentials if c.is_active]),
             "evidence_chunks": len(self.evidence.chunks),
             "skills": len(self.graph.skills),
             "unbacked_skills": [s.name for s in self.graph.unbacked_skills()],
