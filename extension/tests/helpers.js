@@ -60,7 +60,7 @@ let loaded = false
 export function page(html) {
   if (!loaded) {
     fakeLayout()
-    for (const file of ['labels.js', 'fields.js']) {
+    for (const file of ['labels.js', 'fields.js', 'jd.js']) {
       // Indirect eval, so the script runs in global scope exactly as an injected
       // classic script does.
       // eslint-disable-next-line no-eval
@@ -81,6 +81,7 @@ export function shadow(selector, html) {
 }
 
 export const scan = () => window.JobSyncFields.scan()
+export const readJd = () => window.JobSyncJD.read()
 export const fill = (...args) => window.JobSyncFields.fill(...args)
 export const resolve = (selector) =>
   window.JobSyncLabels.resolve(document.querySelector(selector))

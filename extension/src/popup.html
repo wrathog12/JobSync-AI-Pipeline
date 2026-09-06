@@ -31,6 +31,22 @@
       <button class="btn" type="submit">Save</button>
     </form>
 
+    <!-- The JD is not decoration. "Why this role?" cannot be answered without it,
+         and retrieval has nothing to aim at, so it sits above the fields rather
+         than behind a settings panel. -->
+    <section class="jd">
+      <div class="bar">
+        <button id="readJd" class="btn ghost">Read job description</button>
+        <button id="jdToggle" class="btn ghost">Paste or edit</button>
+      </div>
+      <p id="jdSummary" class="muted"></p>
+      <form id="jdForm" class="settings" hidden>
+        <textarea id="jdText" rows="6" spellcheck="false"
+          placeholder="Paste the job description here"></textarea>
+        <button class="btn" type="submit">Use this description</button>
+      </form>
+    </section>
+
     <p id="empty" class="empty">
       Open a job application, then scan. Fields are read from every frame, since
       Greenhouse and Lever forms are usually embedded in one.

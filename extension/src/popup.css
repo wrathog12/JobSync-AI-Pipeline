@@ -116,13 +116,32 @@ h1 {
   color: var(--muted);
 }
 .settings input,
-.settings select {
+.settings select,
+.settings textarea {
   width: 100%;
   padding: 6px 8px;
   border-radius: 5px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
+  font: inherit;
+}
+
+/* The job description block. Above the fields, because an application answered
+   without one is answered for a job in general. */
+.jd {
+  margin-bottom: 10px;
+}
+.jd .bar {
+  margin-bottom: 4px;
+}
+.jd .muted {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.jd textarea {
+  resize: vertical;
   font: inherit;
 }
 

@@ -24,6 +24,8 @@ async function send(type, payload = {}) {
 const state = {
   tabId: null,
   fields: [],
+  /** The description this application is being written against, or null. */
+  jd: null,
   /** key -> { trace, error, filled } */
   results: new Map(),
 }
@@ -170,6 +172,87 @@ function actions(field, trace, cls) {
   return row
 }
 
+// ── the job description ───────────────────────────────────────────────────────
+
+const SOURCE_NAME = {
+  'json-ld': "the page's own job posting data",
+  container: 'the description on the page',
+  density: 'the main text of the page',
+  pasted: 'what you pasted',
+}
+
+function showJd(jd) {
+  state.jd = jd || null
+  const summary = $('jdSummary')
+  if (!jd?.jd_text) {
+    summary.textContent =
+      'No job description attached — answers will be written for the role in general.'
+    return
+  }
+  const words = jd.jd_text.split(/\s+/).filter(Boolean).length
+  const who = [jd.role_title, jd.company].filter(Boolean).join(' · ')
+  const from = SOURCE_NAME[jd.source] || jd.source
+  summary.textContent = `${who || 'Job description'} — ${words} words, from ${from}.`
+}
+
+async function loadJd() {
+  try {
+    showJd(await send('jd', { tabId: state.tabId }))
+  } catch {
+    showJd(null) // the worker knowing nothing is not worth a banner
+  }
+}
+
+/** Read it, attach it, and say where it came from.
+ *
+ * Attaching without a confirmation step is deliberate, and is not the same call as
+ * filling a field: this is input, not output — nothing is written to the form and
+ * a bad grab is fixed by editing it. What is *not* acceptable is a silent one, so
+ * the source and the length are always on screen. */
+async function readJd() {
+  banner('')
+  $('readJd').disabled = true
+  try {
+    const found = await send('readJd', { tabId: state.tabId })
+    if (!found?.jd_text) {
+      banner('Could not find a job description on this page — paste it instead.')
+      $('jdForm').hidden = false
+      $('jdText').focus()
+      return
+    }
+    showJd(await send('useJd', { tabId: state.tabId, jd: found }))
+    $('jdText').value = found.jd_text
+    if (found.truncated) banner('The description was long, so only the first part was kept.')
+  } catch (err) {
+    banner(err.message)
+  } finally {
+    $('readJd').disabled = false
+  }
+}
+
+$('readJd').onclick = readJd
+
+$('jdToggle').onclick = () => {
+  const form = $('jdForm')
+  form.hidden = !form.hidden
+  if (!form.hidden) {
+    $('jdText').value = state.jd?.jd_text || $('jdText').value
+    $('jdText').focus()
+  }
+}
+
+$('jdForm').onsubmit = async (event) => {
+  event.preventDefault()
+  banner('')
+  try {
+    const jd = { jd_text: $('jdText').value, source: 'pasted', url: null }
+    showJd(await send('useJd', { tabId: state.tabId, jd }))
+    $('jdForm').hidden = true
+  } catch (err) {
+    banner(err.message)
+  }
+}
+
 // ── actions ───────────────────────────────────────────────────────────────────
 
 async function scan() {
@@ -287,6 +370,7 @@ $('endSession').onclick = async () => {
   await send('endSession', { tabId: state.tabId })
   state.results.clear()
   $('endSession').hidden = true
+  showJd(null)
   render()
 }
 
@@ -296,5 +380,6 @@ $('endSession').onclick = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   state.tabId = tab?.id ?? null
   await loadSettings()
+  await loadJd()
   await checkHealth()
 })()

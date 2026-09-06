@@ -82,8 +82,62 @@ async function sessionFor(tabId, jdText) {
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove(sessionKey(tabId))
+  chrome.storage.session.remove([sessionKey(tabId), jdKey(tabId)])
 })
+
+// ── the job description ───────────────────────────────────────────────────────
+//
+// Read once and attached to the session, never re-read per page: by page 4 of a
+// Workday wizard the description is gone from the DOM. Without it "why do you
+// want this role?" is answered for a role in general, which is the difference
+// between a tailored application and a mail merge.
+
+const jdKey = (tabId) => `jd:${tabId}`
+
+/** How much a source is worth trusting. JSON-LD is a promise the site made to a
+ * search engine; density is us guessing well. */
+const JD_RANK = { 'json-ld': 3, container: 2, density: 1, none: 0 }
+
+async function readJd(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    files: ['src/jd.js'],
+  })
+  const results = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    func: () => window.JobSyncJD.read(),
+  })
+  const found = results.map((r) => r.result).filter((r) => r?.jd_text)
+  // Every frame answers, and the best answer is usually not in the frame with the
+  // form in it: Greenhouse and Lever are embedded in the employer's own page, so
+  // the description is in the parent and the fields are in the iframe.
+  found.sort(
+    (a, b) => JD_RANK[b.source] - JD_RANK[a.source] || b.jd_text.length - a.jd_text.length
+  )
+  return found[0] || { jd_text: '', source: 'none' }
+}
+
+const currentJd = async (tabId) => (await chrome.storage.session.get(jdKey(tabId)))[jdKey(tabId)] || null
+
+/** Attach a description to this tab's session, opening one if this is the first
+ * thing that has happened. Also kept in `chrome.storage.session`, so an answer
+ * still carries the JD if the worker was torn down in between. */
+async function useJd(tabId, jd) {
+  const text = (jd?.jd_text || '').trim()
+  if (!text) throw new Error('there is no job description text to attach')
+  const record = { ...jd, jd_text: text }
+  await chrome.storage.session.set({ [jdKey(tabId)]: record })
+  const sessionId = await sessionFor(tabId, text)
+  const session = await api(`/sessions/${sessionId}/jd`, {
+    method: 'POST',
+    body: JSON.stringify({
+      jd_text: text,
+      company: jd.company || null,
+      role_title: jd.role_title || null,
+    }),
+  })
+  return { ...record, session }
+}
 
 // ── injection ─────────────────────────────────────────────────────────────────
 //
@@ -138,7 +192,8 @@ async function fill(tabId, frameId, fieldId, value, fieldClass) {
 
 async function answer(tabId, field, jdText, regenerate) {
   const { mode } = await settings()
-  const sessionId = await sessionFor(tabId, jdText)
+  const jd = jdText || (await currentJd(tabId))?.jd_text || null
+  const sessionId = await sessionFor(tabId, jd)
   const max = field.constraints?.max_value
   const unit = field.constraints?.unit
   return api('/answer', {
@@ -152,6 +207,9 @@ async function answer(tabId, field, jdText, regenerate) {
       // the backend's `Constraints.max_chars` uses, so both ends agree.
       max_chars: max ? (unit === 'words' ? max * 6 : max) : null,
       session_id: sessionId,
+      // Sent as well as held on the session: a session opened before the JD was
+      // read would otherwise answer the first page for no particular job.
+      jd_text: jd,
       // The session replays an answer it has already given for a field, which is
       // what makes revisiting a page idempotent. "Again" is the user asking for
       // that to be bypassed on purpose.
@@ -165,6 +223,9 @@ async function answer(tabId, field, jdText, regenerate) {
 const HANDLERS = {
   health: () => api('/health'),
   scan: ({ tabId }) => scan(tabId),
+  jd: ({ tabId }) => currentJd(tabId),
+  readJd: ({ tabId }) => readJd(tabId),
+  useJd: ({ tabId, jd }) => useJd(tabId, jd),
   answer: ({ tabId, field, jdText, regenerate }) => answer(tabId, field, jdText, regenerate),
   fill: ({ tabId, frameId, fieldId, value, fieldClass }) =>
     fill(tabId, frameId, fieldId, value, fieldClass),
@@ -189,6 +250,8 @@ const HANDLERS = {
       await api(`/sessions/${id}`, { method: 'DELETE' }).catch(() => {})
       await chrome.storage.session.remove(key)
     }
+    // The JD belongs to the application, not to the tab, so ending one clears it.
+    await chrome.storage.session.remove(jdKey(tabId))
     return { ended: Boolean(id) }
   },
 }
