@@ -3,7 +3,14 @@ import type {
   ApplicationSession,
   ConfirmRequest,
   ConfirmView,
+  Credential,
   DocumentView,
+  Education,
+  Employment,
+  Identity,
+  Ledger,
+  Profile,
+  Project,
   StructureView,
   TraceView,
 } from './types.generated'
@@ -83,15 +90,74 @@ export interface EvidenceView {
   attributed_text: string
 }
 
+export interface SkillView {
+  id: string
+  name: string
+  evidence_ids: string[]
+  years: number | null
+  proficiency: string | null
+}
+
 export interface MemoryView {
-  identity: Record<string, unknown> | null
-  profile: Record<string, unknown> | null
-  ledger: Record<string, unknown>
-  skills: Array<{ id: string; name: string; evidence_ids: string[]; years: number | null; proficiency: string | null }>
+  identity: Identity | null
+  profile: Profile | null
+  ledger: Ledger
+  /** The merged graph: declared skills plus the ones the bullets reference. */
+  skills: SkillView[]
+  /** The subset the user actually listed — and the only subset that can be
+   * renamed or removed. An inferred skill is there because an achievement points
+   * at it, so a delete button next to one would just 404. */
+  declared_skills: SkillView[]
   evidence: EvidenceView[]
   stats: MemoryStats
   /** True until you confirm something. Not the same as "still loading". */
   is_empty: boolean
+}
+
+/** What the answer layer is configured with. Never the key itself. */
+export interface LlmConfig {
+  provider: string
+  model_fast: string
+  model_strong: string
+  has_server_key: boolean
+  require_user_key: boolean
+  max_output_tokens: number
+}
+
+/** The fields a form actually has, flattened out of `DateRange` — nothing on the
+ * page has a reason to know that type exists. Absent and `null` are different:
+ * leaving `end` out means "don't touch it", sending `null` means "I still work
+ * here". So this is built by hand from the inputs that changed, never spread
+ * from a whole record. */
+export interface RecordPatch {
+  employer?: string | null
+  title?: string | null
+  location?: string | null
+  summary?: string | null
+  achievements?: string[]
+  institution?: string | null
+  degree?: string | null
+  field_of_study?: string | null
+  gpa?: number | null
+  honors?: string[]
+  name?: string | null
+  role?: string | null
+  url?: string | null
+  issuer?: string | null
+  issued?: string | null
+  expires?: string | null
+  credential_id?: string | null
+  start?: string | null
+  end?: string | null
+}
+
+export interface EditResult {
+  memory: MemoryStats
+  record?: Employment | Education | Project | Credential
+  superseded?: string
+  retracted?: string
+  skill?: SkillView
+  removed?: string
 }
 
 /** What is actually on disk. `null` means storage is switched off, which is a
@@ -122,6 +188,42 @@ export const api = {
   modes: () => json<ModeInfo[]>('/meta/modes'),
   competencies: () => json<CompetencyInfo[]>('/meta/competencies'),
   memory: () => json<MemoryView>('/memory'),
+  llm: () => json<LlmConfig>('/meta/llm'),
+
+  // ── editing what memory already holds ──
+  // Every one of these is a supersede on the server, not an in-place write: the
+  // old record stays, flagged, out of retrieval. That is why `editRecord` hands
+  // back a *new* id — a caller still holding the old one is holding a record that
+  // just went inactive.
+
+  editRecord: (id: string, patch: RecordPatch) =>
+    json<EditResult>(`/memory/records/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  /** Not a delete. It leaves retrieval and stays on disk, because an application
+   * already sent somewhere may have been built on it. */
+  removeRecord: (id: string) => json<EditResult>(`/memory/records/${id}`, { method: 'DELETE' }),
+
+  editProfile: (patch: Partial<Profile>) =>
+    json<EditResult & { profile: Profile }>('/memory/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  /** `unlock` is deliberate rather than absent. Names change; they do not change
+   * because the last document parsed said something else. */
+  editIdentity: (patch: Partial<Identity>, unlock = false) =>
+    json<EditResult & { identity: Identity }>(`/memory/identity?unlock=${unlock}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  addSkill: (name: string) =>
+    json<EditResult>('/memory/skills', { method: 'POST', body: JSON.stringify({ name }) }),
+
+  renameSkill: (id: string, name: string) =>
+    json<EditResult>(`/memory/skills/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+
+  removeSkill: (id: string) => json<EditResult>(`/memory/skills/${id}`, { method: 'DELETE' }),
 
   // Both destructive and both explicit. The demo profile used to load itself on
   // first read, which put a fictional person's locked identity in the way of the
