@@ -357,3 +357,21 @@ def test_a_soft_skill_is_still_refused(client):
 
 def test_an_unknown_skill_is_a_404(client):
     assert client.delete("/memory/skills/sk_nope").status_code == 404
+
+
+def test_memory_says_which_skills_can_be_edited(client, store):
+    """`skills` is the merged graph — declared plus inferred from the bullets that
+    reference them. Only the declared ones can be renamed or removed, so a page
+    handed the merged list alone would render a delete button that 404s."""
+    body = client.get("/memory").json()
+    declared = {s["id"] for s in body["declared_skills"]}
+    merged = {s["id"] for s in body["skills"]}
+
+    assert declared, "the fixture lists skills"
+    assert declared <= merged
+    assert declared == {s.id for s in store.declared_skills}
+
+    for skill_id in merged - declared:
+        assert client.delete(f"/memory/skills/{skill_id}").status_code == 404, (
+            "an inferred skill is not removable — a bullet points at it"
+        )

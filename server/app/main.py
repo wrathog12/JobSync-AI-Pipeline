@@ -232,12 +232,22 @@ def llm_status(api_key: str | None = None) -> dict:
 
 @app.get("/memory")
 def memory() -> dict:
+    """Everything memory holds, for a page that shows it and lets it be edited.
+
+    `skills` is the merged graph — declared skills plus the ones inferred from the
+    achievements that reference them. `declared_skills` is the subset the user
+    actually listed, and it is reported separately because it is the only subset
+    that can be renamed or removed: an inferred skill exists because a bullet
+    points at it, so the honest way to drop one is to edit that bullet. A page
+    given only the merged list would offer a delete button that 404s.
+    """
     store = get_store()
     return {
         "identity": store.identity.model_dump(mode="json") if store.identity else None,
         "profile": store.profile.model_dump(mode="json") if store.profile else None,
         "ledger": store.ledger.model_dump(mode="json"),
         "skills": [s.model_dump(mode="json") for s in store.graph.skills],
+        "declared_skills": [s.model_dump(mode="json") for s in store.declared_skills],
         "evidence": [
             {
                 "chunk_id": c.chunk_id,
