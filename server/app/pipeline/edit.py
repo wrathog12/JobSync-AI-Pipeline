@@ -50,7 +50,14 @@ from ..schemas.ledger import (
     LedgerRecord,
     Project,
 )
-from ..schemas.profile import Links, Location, Preferences, Profile, WorkAuthorization
+from ..schemas.profile import (
+    STALE_AFTER_DAYS,
+    Links,
+    Location,
+    Preferences,
+    Profile,
+    WorkAuthorization,
+)
 from ..taxonomy import competencies as comp_tax
 from .structure import _metrics
 
@@ -284,9 +291,30 @@ def edit_profile(patch: ProfilePatch, store: MemoryStore) -> Profile:
             value.source = Source.USER_ENTERED
         setattr(store.profile, key, value)
         store.profile.confirmations[key] = now
+        _stamp_nested(store.profile, key, value, now)
 
     store.profile.provenance = _by_hand(now)
     return store.profile
+
+
+def _stamp_nested(profile: Profile, key: str, value: object, now: datetime) -> None:
+    """Confirm the dotted paths *inside* the sub-object that was just written.
+
+    Staleness is tracked per dotted path, and one of the tracked paths is nested:
+    `preferences.desired_comp`. Stamping only `preferences` left the page telling
+    the user their expected salary was worth re-checking in the same breath as
+    saving it — the exact false alarm the authorization stamp above exists to stop,
+    one level down.
+
+    Only paths with a value are stamped. A `desired_comp` left empty has not been
+    confirmed, it has been declined, and it should keep asking.
+    """
+    for path in STALE_AFTER_DAYS:
+        prefix, _, attr = path.partition(".")
+        if prefix != key or not attr:
+            continue
+        if getattr(value, attr, None) is not None:
+            profile.confirmations[path] = now
 
 
 # ── L0: identity ───────────────────────────────────────────────────────────────

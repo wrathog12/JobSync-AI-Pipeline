@@ -84,7 +84,7 @@ export function SettingsScreen({
           ) : (
             <div className="hint warn">
               Storage is switched off, so everything you save disappears when the server restarts. Set
-              <code> JOBSYNC_DB_PATH</code> in <code>server/.env</code> to turn it on.
+              <code> DB_PATH</code> in <code>server/.env</code> to turn it on.
             </div>
           )}
         </div>

@@ -258,6 +258,37 @@ def test_work_authorization_can_only_be_entered_here(client, store):
     )
 
 
+def test_an_expected_salary_just_typed_is_not_reported_stale(client, store):
+    """Staleness is tracked per dotted path, and one tracked path is nested inside
+    a sub-object: `preferences.desired_comp`. Stamping only `preferences` had the
+    page telling the user their salary was worth re-checking in the same breath as
+    saving it."""
+    res = client.patch(
+        "/memory/profile",
+        json={
+            "preferences": {
+                "remote_preference": "remote",
+                "notice_period_days": 30,
+                "desired_comp": {"amount": 2500000, "currency": "INR", "basis": "annual"},
+            }
+        },
+    )
+
+    assert res.status_code == 200, res.text
+    assert store.profile.preferences.desired_comp.amount == 2500000
+    assert "preferences.desired_comp" not in res.json()["memory"]["stale_paths"]
+
+
+def test_preferences_left_empty_keep_asking(client, store):
+    """Declining to give a number is not confirming one. A blank `desired_comp`
+    stays on the staleness list, because the prompt for it is the whole point."""
+    res = client.patch("/memory/profile", json={"preferences": {"remote_preference": "onsite"}})
+
+    assert res.status_code == 200
+    assert store.profile.preferences.desired_comp is None
+    assert "preferences.desired_comp" in res.json()["memory"]["stale_paths"]
+
+
 def test_a_field_the_profile_does_not_have_is_rejected(client):
     """`extra="forbid"`. A typo'd key that returns 200 is how a UI ends up saving
     nothing while showing a success message."""
