@@ -11,13 +11,14 @@ declines rather than invents when it can't.
 
 ## What it does today
 
-1. You upload your CV and project documents once.
+1. You upload your CV and project documents once, on the profile page.
 2. You review what it extracted and confirm it, item by item. Nothing enters
    memory unconfirmed.
-3. On a job application, you click the extension. It reads the job description
+3. Anything it read wrong you fix by hand, on the same page, at any time.
+4. On a job application, you click the extension. It reads the job description
    off the page, reads the form, works out what each field is asking, and answers
    from your memory.
-4. **Nothing is written to the page until you click fill on that field.**
+5. **Nothing is written to the page until you click fill on that field.**
    Generating and filling are two separate actions on purpose.
 
 It finds the questions by their ARIA roles rather than their tags, so a form built
@@ -39,16 +40,45 @@ be correct.
 
 ---
 
+## The profile page
+
+A separate page — not part of the extension — with three screens:
+
+- **Add** — drop a CV or a project document, read it, tick the items that are
+  right, fix the ones that aren't, save. Bullets it could not find word-for-word
+  in your document are flagged, and you either edit them into your own words or
+  leave them out.
+- **Profile** — everything in memory, every item editable where you found it. Your
+  name, contact details, work authorisation, what you're looking for, and each
+  job, degree, project and certificate.
+- **Settings** — what's switched on, where the file lives, and the two buttons
+  that throw it all away.
+
+Editing never overwrites. A correction saves a new version and keeps the old one,
+flagged and out of use — because if you already sent an application built on the
+old wording, that record is the only thing left that can tell you what you said.
+Removing something works the same way: out of use, still on disk.
+
+It runs beside the backend rather than inside the extension, and the two never
+talk to each other directly: page → backend, extension → backend. The backend is
+the only source of truth, so they cannot disagree.
+
+---
+
 ## Repository layout
 
 | Path | What it is |
 |---|---|
 | `server/` | FastAPI backend. The memory, the pipeline, all the rules. |
 | `extension/` | The Chrome extension (MV3). Reads forms, writes answers. |
-| `viewer/` | A React debug UI. **Developer tool, not the product** — see below. |
+| `viewer/` | The profile page (React + Vite). Upload, edit, settings. |
 | `fixtures/` | Sample profile and form fixtures for tests and demos. |
 | `ARCHITECTURE.md` | Why it's built this way. The design review that started it. |
 | `STATUS.md` | What is done, what is not, what is next. |
+
+`viewer/` keeps its old directory name because renaming it would rewrite every
+import and every path in this file for no gain. The package inside it is
+`jobsync-page`.
 
 ---
 
@@ -82,7 +112,21 @@ second, empty memory:
 Check `http://127.0.0.1:8000/health`. The `storage` block tells you where your
 memory lives and how many rows are in it.
 
-### 2. Extension
+### 2. Profile page
+
+```bash
+cd viewer
+npm install
+npm run dev
+```
+
+It opens on `http://127.0.0.1:5173` and proxies `/api` to the backend on port
+8000. If you started the backend somewhere else, `API_PORT=8011 npm run dev`.
+
+Upload a document, tick what's right, save. Saving is what writes to memory —
+until you do, the extension will keep saying memory is empty.
+
+### 3. Extension
 
 1. Chrome → `chrome://extensions`
 2. Turn on **Developer mode**
@@ -94,29 +138,19 @@ No build step and no bundler — the source is what ships. After editing anythin
 in `extension/src/`, press ↻ on the extension card, then reload the page you're
 testing against.
 
-### 3. Filling your memory
-
-Right now this happens in the viewer, which is a developer tool and looks like
-one:
-
-```bash
-cd viewer
-npm install
-npm run dev
-```
-
-Upload a document, structure it, then confirm each item. Confirming is what
-writes to memory — until you do, the extension will keep saying memory is empty.
-
-**A proper upload/profile page is the next piece of work.** See `STATUS.md`.
+The popup's **Profile** button opens the page above, reusing the tab if it is
+already open. Both URLs are in the popup's ⚙ settings, and both origins are in
+`host_permissions` — Chrome blocks any host the manifest has not declared,
+whatever the setting says.
 
 ---
 
 ## Running the tests
 
 ```bash
-cd server && .venv/Scripts/python.exe -m pytest -q    # 446 tests
+cd server && .venv/Scripts/python.exe -m pytest -q    # 475 tests
 cd extension && npm test                              # 72 tests
+cd viewer && npx tsc --noEmit                         # the page typechecks
 ```
 
 ---
@@ -139,13 +173,19 @@ non-verbatim and the guard fails open.
 consulted, against a deny-list — and refused again in the page, because that's
 where the write actually happens and it's the last place that can say no.
 
+**4. Nothing in your history is ever deleted or overwritten.** An edit appends a
+corrected version and flags the old one. A removal flags it and leaves it. This
+costs a row per correction and buys the one question a submitted application makes
+you ask: what did I tell them last time.
+
 ---
 
 ## Current limitations
 
 It is single-user by construction: the database schema has `CHECK (id = 1)` on
-your identity row. The API key lives in `server/.env` and is yours. The backend
-runs on `localhost` and the extension is hard-wired to it.
+your identity row. The API key lives in `server/.env` and is yours. Both the
+backend and the page run on `localhost`, and the two origins the extension may
+reach are fixed in `manifest.json`.
 
 None of this is an oversight — it's a deliberately scoped first version. The full
 list of what's missing, and the order it should be fixed in, is in `STATUS.md`.
