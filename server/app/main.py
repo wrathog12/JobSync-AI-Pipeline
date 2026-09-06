@@ -65,8 +65,16 @@ async def lifespan(app: FastAPI):  # noqa: ANN201
     db = open_db(get_settings().db_path)
     if db is not None:
         found = store_db.load_all(get_store(), get_documents(), get_candidates(), db)
+        # Applications in progress come back too. An unfinished Workday form is
+        # half an hour of the user's work, and until this line a server restart
+        # threw away the job description they had pasted into it.
+        restored = store_db.load_sessions(get_sessions(), db)
         log.info(
-            "storage: %s (%s)", db.path, "restored existing memory" if found else "empty"
+            "storage: %s (%s, %d session%s in progress)",
+            db.path,
+            "restored existing memory" if found else "empty",
+            restored,
+            "" if restored == 1 else "s",
         )
     else:
         log.warning("storage: disabled — nothing you confirm will survive a restart")
@@ -105,6 +113,17 @@ MAX_TRACES = 200
 def _persist_memory() -> None:
     if (db := get_db()) is not None:
         store_db.save_memory(get_store(), db)
+
+
+def _persist_session(session) -> None:  # noqa: ANN001 — ApplicationSession
+    """Mirror one session to disk. Called by every endpoint that changes one.
+
+    Per session rather than "save them all": the write happens on the answer path,
+    which is the hot one, and rewriting ninety-nine untouched applications to
+    record one answer is the kind of cost that turns into a mystery later.
+    """
+    if (db := get_db()) is not None:
+        store_db.save_session(session, db)
 
 
 @app.get("/health")
@@ -266,6 +285,10 @@ def generate_answer(req: AnswerRequest) -> dict:
     if req.session_id and session is None:
         raise HTTPException(status_code=404, detail="unknown session_id")
     trace = answer_pipeline.run(req, store, session)
+    # The session recorded this answer and spent the evidence behind it. Both are
+    # what stop the next page repeating this one, so they are saved with it.
+    if session is not None:
+        _persist_session(session)
     TRACES.insert(0, trace)
     del TRACES[MAX_TRACES:]
     return trace.model_dump_view()
@@ -498,6 +521,7 @@ def create_session(body: SessionCreate) -> dict:
         role_title=body.role_title,
         origin=body.origin,
     )
+    _persist_session(session)
     return session.model_dump(mode="json")
 
 
@@ -550,6 +574,9 @@ def set_session_jd(session_id: str, body: JdUpdate) -> dict:
         session.role_title = body.role_title
 
     replaced = bool(before and before != session.jd_fingerprint)
+    # Before returning, not after: a JD the user pasted by hand is the one piece of
+    # session state they cannot reproduce from the page.
+    _persist_session(session)
     return {
         **session.model_dump(mode="json"),
         "replaced": replaced,
@@ -564,12 +591,18 @@ def next_page(session_id: str, page_url: str | None = None) -> dict:
     if session is None:
         raise HTTPException(status_code=404, detail="unknown session_id")
     session.advance_page(page_url)
+    _persist_session(session)
     return session.model_dump(mode="json")
 
 
 @app.delete("/sessions/{session_id}")
 def drop_session(session_id: str) -> dict:
-    return {"dropped": get_sessions().drop(session_id)}
+    dropped = get_sessions().drop(session_id)
+    # Unconditionally, even when the session was not in memory: a stored row for a
+    # session the process has already forgotten would come back on the next restart.
+    if (db := get_db()) is not None:
+        store_db.delete_session(session_id, db)
+    return {"dropped": dropped}
 
 
 @app.get("/traces")

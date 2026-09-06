@@ -229,6 +229,58 @@ def load_staging(documents, candidates: CandidateStore, db: Database) -> None:  
                 candidates.put(result)
 
 
+# ── L6: applications in progress ───────────────────────────────────────────────
+#
+# Sessions are stored, and are still not memory. L6 is sealed off from L0-L5 —
+# nothing here is ever merged into the ledger, and `test_session_never_writes_to_
+# durable_memory` is the test that keeps it that way. What persistence buys is the
+# user's work: the description they pasted, the answers already given, and the
+# spent-evidence ledger that stops page 6 retelling page 2's story. A Workday
+# application is filled over half an hour, and losing it to a server restart was
+# the one failure in this system that destroys something the user cannot redo
+# cheaply.
+
+
+def save_session(session, db: Database) -> None:  # noqa: ANN001 — ApplicationSession
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO session (session_id, jd_fingerprint, data, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            # created_at is left alone on update: it is when the application was
+            # started, which is what makes the eviction order meaningful.
+            "ON CONFLICT(session_id) DO UPDATE SET jd_fingerprint = excluded.jd_fingerprint, "
+            "data = excluded.data, updated_at = excluded.updated_at",
+            (
+                session.session_id,
+                session.jd_fingerprint,
+                session.model_dump_json(),
+                session.created_at.isoformat(),
+                _now(),
+            ),
+        )
+
+
+def delete_session(session_id: str, db: Database) -> None:
+    with db.tx() as conn:
+        conn.execute("DELETE FROM session WHERE session_id = ?", (session_id,))
+
+
+def load_sessions(sessions, db: Database) -> int:  # noqa: ANN001 — SessionStore
+    """Restore applications in progress. Returns how many came back.
+
+    Oldest first, so the store's own eviction order survives the round trip: it
+    drops the oldest when it is full, and loading in a different order would make a
+    restart quietly discard the wrong application.
+    """
+    from ..schemas.session import ApplicationSession
+
+    with db.read() as conn:
+        rows = conn.execute("SELECT data FROM session ORDER BY created_at, rowid").fetchall()
+    for row in rows:
+        sessions.put(ApplicationSession.model_validate_json(row["data"]))
+    return len(rows)
+
+
 def load_all(store: MemoryStore, documents, candidates: CandidateStore, db: Database) -> bool:  # noqa: ANN001
     """Everything, at startup. Returns whether stored memory was found."""
     found = load_memory(store, db)
@@ -241,13 +293,23 @@ def stats(db: Database) -> dict:
     with db.read() as conn:
         counts = {
             table: int(conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0])  # noqa: S608
-            for table in ("ledger_record", "declared_skill", "approved_answer", "document", "candidate")
+            for table in (
+                "ledger_record",
+                "declared_skill",
+                "approved_answer",
+                "document",
+                "candidate",
+                "session",
+            )
         }
     return {"path": db.path, **counts}
 
 
 __all__ = [
     "load_memory",
+    "save_session",
+    "delete_session",
+    "load_sessions",
     "save_memory",
     "wipe_memory",
     "save_document",

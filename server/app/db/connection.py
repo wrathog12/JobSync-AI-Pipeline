@@ -101,6 +101,25 @@ MIGRATIONS: list[str] = [
         created_at TEXT NOT NULL
     );
     """,
+    # ── v2: L6 sessions ──
+    """
+    -- An application in progress. Not memory and never merged into it — L6 is
+    -- sealed off from L0-L5 by design — but losing one is losing the user's work:
+    -- the job description they pasted, the answers already given, and the
+    -- anti-repetition ledger that stops page 6 retelling page 2's story.
+    --
+    -- `jd_fingerprint` is promoted out of the JSON because reattaching after
+    -- navigation looks a session up by it: Workday's URL changes on every wizard
+    -- step, so the JD is the only stable key an application has.
+    CREATE TABLE session (
+        session_id     TEXT PRIMARY KEY,
+        jd_fingerprint TEXT,
+        data           TEXT NOT NULL,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    );
+    CREATE INDEX session_jd ON session (jd_fingerprint);
+    """,
 ]
 
 
