@@ -52,7 +52,7 @@ async function checkHealth() {
       chip.textContent = 'memory empty'
       chip.dataset.state = 'bad'
       banner(
-        'Your memory is empty, so almost everything will abstain. Confirm your résumé in the trace viewer first.'
+        'Nothing is in your profile yet, so almost every field will abstain. Hit Profile and upload your résumé.'
       )
       return
     }
@@ -348,7 +348,31 @@ async function fillOne(field, trace) {
 async function loadSettings() {
   const values = await send('settings')
   $('backend').value = values.backend
+  $('page').value = values.page
   $('mode').value = values.mode
+}
+
+/** The profile page opens in a tab, and an already-open one is reused rather than
+ * duplicated: two tabs editing the same memory is how one of them saves over the
+ * other's work without either knowing. */
+$('openProfile').onclick = async () => {
+  const { page } = await send('settings')
+  // Filtering by url needs a host permission for it, and the URL is a setting the
+  // user can point anywhere — so a failed or empty query falls through to opening
+  // a new tab rather than doing nothing.
+  let existing = []
+  try {
+    existing = await chrome.tabs.query({ url: `${page.replace(/\/$/, '')}/*` })
+  } catch {
+    /* no permission for that host — open a fresh tab below */
+  }
+  if (existing.length > 0) {
+    await chrome.tabs.update(existing[0].id, { active: true })
+    await chrome.windows.update(existing[0].windowId, { focused: true })
+  } else {
+    await chrome.tabs.create({ url: page })
+  }
+  window.close()
 }
 
 $('settingsToggle').onclick = () => {
@@ -358,7 +382,11 @@ $('settingsToggle').onclick = () => {
 $('settings').onsubmit = async (event) => {
   event.preventDefault()
   await send('saveSettings', {
-    values: { backend: $('backend').value.replace(/\/$/, ''), mode: $('mode').value },
+    values: {
+      backend: $('backend').value.replace(/\/$/, ''),
+      page: $('page').value.replace(/\/$/, ''),
+      mode: $('mode').value,
+    },
   })
   $('settings').hidden = true
   await checkHealth()

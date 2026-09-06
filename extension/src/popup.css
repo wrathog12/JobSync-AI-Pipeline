@@ -75,6 +75,8 @@ h1 {
   display: flex;
   gap: 6px;
   margin-bottom: 10px;
+  /* Four buttons at 420px is tight, and a clipped one is worse than a wrapped one. */
+  flex-wrap: wrap;
 }
 
 .btn {

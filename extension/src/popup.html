@@ -16,12 +16,20 @@
     <div class="bar">
       <button id="scan" class="btn">Scan this page</button>
       <button id="answerAll" class="btn ghost" disabled>Answer all</button>
+      <!-- Opens in a tab, not in here. Everything on that page is a form, and a
+           popup that closes the moment you click outside it is the wrong place to
+           edit twelve fields of your own history. -->
+      <button id="openProfile" class="btn ghost" title="Your profile — everything this answers from">
+        Profile
+      </button>
       <button id="settingsToggle" class="btn ghost icon" title="Settings">⚙</button>
     </div>
 
     <form id="settings" class="settings" hidden>
       <label for="backend">Backend</label>
       <input id="backend" type="url" spellcheck="false" />
+      <label for="page">Profile page</label>
+      <input id="page" type="url" spellcheck="false" />
       <label for="mode">Mode</label>
       <select id="mode">
         <option value="strict">strict — only what your evidence supports</option>

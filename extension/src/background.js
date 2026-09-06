@@ -18,6 +18,11 @@
 
 const DEFAULTS = {
   backend: 'http://127.0.0.1:8000',
+  // Where the profile page is served. Separate from `backend` because they are
+  // two different services — the page is a static site that talks to the same
+  // API, and it is not bundled in here on purpose: a 40-field form is a bad fit
+  // for a 380px popup that closes when you click away from it.
+  page: 'http://127.0.0.1:5173',
   mode: 'strict',
 }
 
