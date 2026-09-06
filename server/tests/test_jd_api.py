@@ -30,13 +30,20 @@ OTHER_JD = (
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
 
     from app import main
+    from app.config import get_settings
     from app.memory.sessions import get_sessions
 
+    # Storage off: sessions are mirrored to disk now, and a test has no business
+    # leaving rows in the developer's own database. `test_persistence.py` owns the
+    # question of whether they survive a restart.
+    monkeypatch.setattr(
+        main, "get_settings", lambda: get_settings().model_copy(update={"db_path": ""})
+    )
     with TestClient(app=main.app) as c:
         yield c
     get_sessions()._sessions.clear()  # noqa: SLF001 — a store with no public reset
