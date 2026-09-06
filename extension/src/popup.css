@@ -1,6 +1,8 @@
-/* Deliberately close to the trace viewer's palette: the same three field classes
- * carry the same three colours in both, so "attestation" is recognisable without
- * reading the word. */
+/* Dark, and its own palette. It used to match the trace viewer deliberately, so a
+ * field class was the same colour in both; that viewer is gone and the profile page
+ * that replaced it is a light form with no field classes to match. What survives is
+ * the part that earned its keep: green / blue / amber down the left edge, so
+ * "attestation" is recognisable without reading the word. */
 
 :root {
   --bg: #11141a;
