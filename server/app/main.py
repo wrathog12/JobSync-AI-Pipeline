@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import get_settings
 from .db import close_db, get_db, open_db
@@ -36,6 +36,14 @@ class SessionCreate(BaseModel):
     company: str | None = None
     role_title: str | None = None
     origin: str | None = None
+
+
+class JdUpdate(BaseModel):
+    #: The ceiling is a sanity check, not a limit anyone will meet: a long job
+    #: description is about a thousand words.
+    jd_text: str = Field(max_length=60000)
+    company: str | None = None
+    role_title: str | None = None
 
 
 class PasteRequest(BaseModel):
@@ -504,6 +512,49 @@ def get_session(session_id: str) -> dict:
     if session is None:
         raise HTTPException(status_code=404, detail="unknown session_id")
     return session.model_dump(mode="json")
+
+
+@app.post("/sessions/{session_id}/jd")
+def set_session_jd(session_id: str, body: JdUpdate) -> dict:
+    """Attach the job description to a session that already exists.
+
+    The JD almost always arrives *after* the session does. The extension opens a
+    session on the first question it answers, while the description lives on a page
+    the user may read later or paste by hand — and on a Workday wizard it is gone
+    from the DOM by page 4. Without this endpoint a session opened without a JD
+    could never acquire one, and every answer for that application would be written
+    for the role in general rather than for this posting.
+
+    Replacing a JD is allowed and reported. Answers already given were written
+    against the old one and this call does not revise them, so the count of what is
+    now stale is part of the response rather than a surprise later.
+    """
+    session = get_sessions().get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="unknown session_id")
+
+    text = body.jd_text.strip()
+    if len(text) < 40:
+        raise HTTPException(
+            status_code=400,
+            detail="that is too short to be a job description — paste the posting itself",
+        )
+
+    before = session.jd_fingerprint
+    session.set_jd(text)
+    # Only ever filled in, never blanked: a guess from the page is better than
+    # nothing, and a session with no company on it is unidentifiable in a list.
+    if body.company:
+        session.company = body.company
+    if body.role_title:
+        session.role_title = body.role_title
+
+    replaced = bool(before and before != session.jd_fingerprint)
+    return {
+        **session.model_dump(mode="json"),
+        "replaced": replaced,
+        "stale_answers": len(session.answered) if replaced else 0,
+    }
 
 
 @app.post("/sessions/{session_id}/next-page")
