@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import type { ApplicationSession } from './types.generated'
 
 /** L6 readout — the multi-page state a single-field call cannot have. */
@@ -5,10 +7,12 @@ export function SessionPanel({
   session,
   onNextPage,
   onEnd,
+  onSetJd,
 }: {
   session: ApplicationSession | null
   onNextPage: () => void
   onEnd: () => void
+  onSetJd: (text: string) => Promise<{ replaced: boolean; stale_answers: number }>
 }) {
   if (!session)
     return (
@@ -41,6 +45,8 @@ export function SessionPanel({
               <span className="warnlist">none set</span>
             )}
           </dd>
+          <dt>role</dt>
+          <dd>{session.role_title || session.company || '—'}</dd>
           <dt>fields</dt>
           <dd>
             {generated.length} answered · {abstained.length} abstained
@@ -57,6 +63,8 @@ export function SessionPanel({
           </button>
         </div>
       </div>
+
+      <JdCard session={session} onSetJd={onSetJd} />
 
       <div className="card">
         <h3>Spent evidence (anti-repetition ledger)</h3>
@@ -131,6 +139,77 @@ export function SessionPanel({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/** The job description, and a way to attach one after the fact.
+ *
+ * A session almost always exists before its JD does: the extension opens one on
+ * the first question it answers, and on a Workday wizard the posting is out of
+ * the DOM by page 4. Without somewhere to paste it, every answer for that
+ * application is written for the role in general rather than for this posting.
+ *
+ * Replacing is allowed and reported. The answers already given were written
+ * against the old description and this does not revise them — saying nothing
+ * would leave you believing the whole application was tailored to a posting most
+ * of it never saw.
+ */
+function JdCard({
+  session,
+  onSetJd,
+}: {
+  session: ApplicationSession
+  onSetJd: (text: string) => Promise<{ replaced: boolean; stale_answers: number }>
+}) {
+  const [draft, setDraft] = useState('')
+  const [note, setNote] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setBusy(true)
+    setNote(null)
+    try {
+      const res = await onSetJd(draft)
+      setDraft('')
+      setNote(
+        res.replaced
+          ? `Replaced. ${res.stale_answers} answer${res.stale_answers === 1 ? '' : 's'} on this application were written against the previous description and have not been revised.`
+          : 'Attached.'
+      )
+    } catch (e) {
+      setNote(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card wide">
+      <h3>Job description</h3>
+      {session.jd_text ? (
+        <pre className="jd">{session.jd_text}</pre>
+      ) : (
+        <div className="warnlist">
+          None on file. Answers are being written for the role in general, not for this posting.
+        </div>
+      )}
+      <textarea
+        rows={5}
+        value={draft}
+        placeholder="Paste the posting to attach or replace it…"
+        onChange={(e) => setDraft(e.target.value)}
+        style={{ marginTop: 10 }}
+      />
+      <div className="actions" style={{ marginTop: 8 }}>
+        <button className="btn ghost" onClick={save} disabled={busy || draft.trim().length < 40}>
+          {session.jd_text ? 'Replace JD' : 'Attach JD'}
+        </button>
+        {/* The floor is the server's: under 40 characters is a cookie banner, not
+            a job description, and a wrong JD steers every answer silently. */}
+        <span className="n">{draft.trim().length} characters</span>
+      </div>
+      {note && <div className="note" style={{ marginTop: 8 }}>{note}</div>}
     </div>
   )
 }

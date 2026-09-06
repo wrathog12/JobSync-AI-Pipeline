@@ -125,6 +125,11 @@ pre.prompt { background: var(--bg); border: 1px solid var(--border); border-radi
   padding: 12px; overflow-x: auto; font: 12px/1.55 var(--mono); color: var(--dim);
   white-space: pre-wrap; margin: 8px 0 0; }
 
+/* A JD is long, and scrolling one is better than a page that scrolls for it. */
+pre.jd { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px; max-height: 220px; overflow-y: auto; font-family: inherit;
+  font-size: 12.5px; line-height: 1.6; color: var(--text); white-space: pre-wrap; margin: 0; }
+
 .footer { display: flex; gap: 16px; font: 11px var(--mono); color: var(--dimmer);
   margin-top: 12px; flex-wrap: wrap; }
 

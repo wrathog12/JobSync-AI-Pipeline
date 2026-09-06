@@ -391,6 +391,15 @@ export default function App() {
             if (session) await api.endSession(session.session_id)
             setSession(null)
           }}
+          onSetJd={async (text) => {
+            if (!session) throw new Error('no application open')
+            const res = await api.setSessionJd(session.session_id, { jd_text: text })
+            setSession(res)
+            // Keep the Ask tab's JD box in step: two different descriptions in one
+            // window is how you spend an afternoon debugging retrieval.
+            setJd(text)
+            return res
+          }}
         />
       )}
 

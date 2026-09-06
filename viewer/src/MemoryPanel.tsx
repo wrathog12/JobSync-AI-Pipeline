@@ -59,9 +59,10 @@ export function MemoryPanel({
               {storage.ledger_record === 1 ? '' : 's'}, {storage.declared_skill} skill
               {storage.declared_skill === 1 ? '' : 's'}, {storage.approved_answer} approved answer
               {storage.approved_answer === 1 ? '' : 's'}, {storage.document} document
-              {storage.document === 1 ? '' : 's'} and {storage.candidate} pending review
-              {storage.candidate === 1 ? '' : 's'}. The derived layers are absent on purpose —
-              they are rebuilt from the ledger on every start.
+              {storage.document === 1 ? '' : 's'}, {storage.candidate} pending review
+              {storage.candidate === 1 ? '' : 's'} and {storage.session} application
+              {storage.session === 1 ? '' : 's'} in progress. The derived layers are absent on
+              purpose — they are rebuilt from the ledger on every start.
             </div>
           )
         )}

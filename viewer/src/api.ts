@@ -104,6 +104,9 @@ export interface StorageInfo {
   approved_answer: number
   document: number
   candidate: number
+  /** Applications in progress. Not memory — but losing one loses half an hour of
+   * the user's work, which is why it is on disk at all. */
+  session: number
 }
 
 export interface Health {
@@ -141,6 +144,15 @@ export const api = {
     json<ApplicationSession>('/sessions', { method: 'POST', body: JSON.stringify(body) }),
 
   session: (id: string) => json<ApplicationSession>(`/sessions/${id}`),
+
+  /** Attach (or replace) the job description on a session that already exists.
+   * `stale_answers` is the number of answers written against the *previous* JD;
+   * this call does not revise them, so it says how many are now out of date. */
+  setSessionJd: (id: string, body: { jd_text: string; company?: string | null; role_title?: string | null }) =>
+    json<ApplicationSession & { replaced: boolean; stale_answers: number }>(
+      `/sessions/${id}/jd`,
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
 
   nextPage: (id: string) =>
     json<ApplicationSession>(`/sessions/${id}/next-page`, { method: 'POST' }),
