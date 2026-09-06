@@ -45,17 +45,22 @@ if (!window.JobSyncLabels) {
       .replace(/\s+/g, ' ')
       .trim()
 
-  /** Text of an element with form controls and their values removed.
+  /** Anything that is a *value* rather than part of the question.
    *
-   * A wrapping `<label>` contains the input; on a `<select>` that means every
-   * option's text is part of `textContent`, so the "label" for a country
-   * dropdown comes back as the question plus 200 country names. */
+   * Native `<option>`s are the obvious case: a wrapping `<label>` contains the
+   * `<select>`, so the "label" for a country dropdown comes back as the question
+   * followed by 200 country names. The ARIA roles matter for the same reason and
+   * are easier to miss — Google Forms builds its radios out of divs, so a
+   * radiogroup's own text is the question *plus every answer to it*. */
+  const VALUE_PARTS =
+    'input, textarea, select, button, option, svg, script, style,' +
+    '[role="radio"], [role="checkbox"], [role="option"], [role="switch"]'
+
+  /** Text of an element with the values stripped out, leaving the question. */
   const textOf = (el) => {
     if (!el) return ''
     const copy = el.cloneNode(true)
-    copy
-      .querySelectorAll('input, textarea, select, button, option, svg, script, style')
-      .forEach((n) => n.remove())
+    copy.querySelectorAll(VALUE_PARTS).forEach((n) => n.remove())
     return strip(copy.textContent)
   }
 
@@ -69,10 +74,21 @@ if (!window.JobSyncLabels) {
    * is not universally present, and when it is missing the whole thing throws and
    * the cascade silently falls through to guessing from `name`. Comparing the
    * attribute cannot be broken by whatever an ATS puts in an id. */
+  /** The document or shadow root the element actually lives in.
+   *
+   * Every id lookup here goes through this rather than through `document`. An
+   * input inside a shadow root has its label inside the same shadow root, and
+   * `document.querySelector` cannot see either of them — so on Workday and any
+   * web-component design system, a `document`-scoped lookup silently finds
+   * nothing and the cascade falls through to guessing from `name`. */
+  const rootOf = (el) => {
+    const root = el.getRootNode ? el.getRootNode() : document
+    return root.querySelectorAll ? root : document
+  }
+
   const byFor = (el) => {
     if (!el.id) return ''
-    const labels = document.querySelectorAll('label[for]')
-    for (const label of labels) {
+    for (const label of rootOf(el).querySelectorAll('label[for]')) {
       if (label.getAttribute('for') === el.id) return textOf(label)
     }
     return ''
@@ -80,9 +96,14 @@ if (!window.JobSyncLabels) {
 
   const byAncestorLabel = (el) => textOf(el.closest('label'))
 
+  const byId = (el, id) => {
+    const root = rootOf(el)
+    return root.getElementById ? root.getElementById(id) : root.querySelector(`[id="${id}"]`)
+  }
+
   const byAriaLabelledBy = (el) => {
     const ids = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
-    return strip(ids.map((id) => textOf(document.getElementById(id))).join(' '))
+    return strip(ids.map((id) => textOf(byId(el, id))).join(' '))
   }
 
   const byAriaLabel = (el) => strip(el.getAttribute('aria-label'))
@@ -92,12 +113,19 @@ if (!window.JobSyncLabels) {
    * including the helper text that carries the word limit. */
   const QUESTION_CONTAINERS = [
     '[data-automation-id^="formField"]', // Workday
+    '[data-automation-id="questionContent"]', // Microsoft Forms
     '.application-question', // Lever
     '.field', // Greenhouse
+    '[role="listitem"]', // Google Forms — one question per listitem
     '[class*="application-field"]',
     '[class*="question"]',
     'fieldset',
   ]
+
+  /** Where the question text lives *inside* a container. `[role="heading"]` is
+   * here for Google and Microsoft Forms, which have no `<label>` anywhere near
+   * the control — the question is a heading div two or three levels up. */
+  const CONTAINER_LABEL = 'label, legend, [role="heading"], [class*="label"], [class*="title"]'
 
   const byQuestionContainer = (el) => {
     for (const selector of QUESTION_CONTAINERS) {
@@ -105,7 +133,7 @@ if (!window.JobSyncLabels) {
       if (!box) continue
       // The container's own label element first — its full text may include
       // helper paragraphs, and those belong to the constraints, not the question.
-      const label = box.querySelector('label, legend, [class*="label"]')
+      const label = box.querySelector(CONTAINER_LABEL)
       const text = textOf(label) || textOf(box)
       if (plausible(text)) return text
     }
@@ -190,5 +218,5 @@ if (!window.JobSyncLabels) {
   const resolve = (el) => walk(SOURCES, el)
   const resolveGroup = (el) => walk(GROUP_SOURCES, el)
 
-  window.JobSyncLabels = { resolve, resolveGroup, clean, strip, textOf, plausible }
+  window.JobSyncLabels = { resolve, resolveGroup, clean, strip, textOf, plausible, rootOf }
 }

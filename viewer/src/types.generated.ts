@@ -102,6 +102,8 @@ export interface Credential {
   provenance: Provenance;
   /** Set when corrected. Superseded records are excluded from retrieval. */
   superseded_by: string | null;
+  /** Removed by the user, with nothing replacing it — a job they never had, read out of a reference. Excluded from retrieval, kept on disk: an application already submitted may have been built on it. */
+  retracted_at: string | null;
   name: string;
   issuer: string;
   issued: string | null;
@@ -122,6 +124,8 @@ export interface Education {
   provenance: Provenance;
   /** Set when corrected. Superseded records are excluded from retrieval. */
   superseded_by: string | null;
+  /** Removed by the user, with nothing replacing it — a job they never had, read out of a reference. Excluded from retrieval, kept on disk: an application already submitted may have been built on it. */
+  retracted_at: string | null;
   institution: string;
   degree: string;
   field_of_study: string | null;
@@ -136,6 +140,8 @@ export interface Employment {
   provenance: Provenance;
   /** Set when corrected. Superseded records are excluded from retrieval. */
   superseded_by: string | null;
+  /** Removed by the user, with nothing replacing it — a job they never had, read out of a reference. Excluded from retrieval, kept on disk: an application already submitted may have been built on it. */
+  retracted_at: string | null;
   employer: string;
   title: string;
   employment_type: EmploymentType;
@@ -153,6 +159,8 @@ export interface Project {
   provenance: Provenance;
   /** Set when corrected. Superseded records are excluded from retrieval. */
   superseded_by: string | null;
+  /** Removed by the user, with nothing replacing it — a job they never had, read out of a reference. Excluded from retrieval, kept on disk: an application already submitted may have been built on it. */
+  retracted_at: string | null;
   name: string;
   role: string | null;
   summary: string | null;

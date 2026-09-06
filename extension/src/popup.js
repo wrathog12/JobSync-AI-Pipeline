@@ -24,6 +24,8 @@ async function send(type, payload = {}) {
 const state = {
   tabId: null,
   fields: [],
+  /** The description this application is being written against, or null. */
+  jd: null,
   /** key -> { trace, error, filled } */
   results: new Map(),
 }
@@ -50,7 +52,7 @@ async function checkHealth() {
       chip.textContent = 'memory empty'
       chip.dataset.state = 'bad'
       banner(
-        'Your memory is empty, so almost everything will abstain. Confirm your résumé in the trace viewer first.'
+        'Nothing is in your profile yet, so almost every field will abstain. Hit Profile and upload your résumé.'
       )
       return
     }
@@ -170,6 +172,87 @@ function actions(field, trace, cls) {
   return row
 }
 
+// ── the job description ───────────────────────────────────────────────────────
+
+const SOURCE_NAME = {
+  'json-ld': "the page's own job posting data",
+  container: 'the description on the page',
+  density: 'the main text of the page',
+  pasted: 'what you pasted',
+}
+
+function showJd(jd) {
+  state.jd = jd || null
+  const summary = $('jdSummary')
+  if (!jd?.jd_text) {
+    summary.textContent =
+      'No job description attached — answers will be written for the role in general.'
+    return
+  }
+  const words = jd.jd_text.split(/\s+/).filter(Boolean).length
+  const who = [jd.role_title, jd.company].filter(Boolean).join(' · ')
+  const from = SOURCE_NAME[jd.source] || jd.source
+  summary.textContent = `${who || 'Job description'} — ${words} words, from ${from}.`
+}
+
+async function loadJd() {
+  try {
+    showJd(await send('jd', { tabId: state.tabId }))
+  } catch {
+    showJd(null) // the worker knowing nothing is not worth a banner
+  }
+}
+
+/** Read it, attach it, and say where it came from.
+ *
+ * Attaching without a confirmation step is deliberate, and is not the same call as
+ * filling a field: this is input, not output — nothing is written to the form and
+ * a bad grab is fixed by editing it. What is *not* acceptable is a silent one, so
+ * the source and the length are always on screen. */
+async function readJd() {
+  banner('')
+  $('readJd').disabled = true
+  try {
+    const found = await send('readJd', { tabId: state.tabId })
+    if (!found?.jd_text) {
+      banner('Could not find a job description on this page — paste it instead.')
+      $('jdForm').hidden = false
+      $('jdText').focus()
+      return
+    }
+    showJd(await send('useJd', { tabId: state.tabId, jd: found }))
+    $('jdText').value = found.jd_text
+    if (found.truncated) banner('The description was long, so only the first part was kept.')
+  } catch (err) {
+    banner(err.message)
+  } finally {
+    $('readJd').disabled = false
+  }
+}
+
+$('readJd').onclick = readJd
+
+$('jdToggle').onclick = () => {
+  const form = $('jdForm')
+  form.hidden = !form.hidden
+  if (!form.hidden) {
+    $('jdText').value = state.jd?.jd_text || $('jdText').value
+    $('jdText').focus()
+  }
+}
+
+$('jdForm').onsubmit = async (event) => {
+  event.preventDefault()
+  banner('')
+  try {
+    const jd = { jd_text: $('jdText').value, source: 'pasted', url: null }
+    showJd(await send('useJd', { tabId: state.tabId, jd }))
+    $('jdForm').hidden = true
+  } catch (err) {
+    banner(err.message)
+  }
+}
+
 // ── actions ───────────────────────────────────────────────────────────────────
 
 async function scan() {
@@ -219,6 +302,27 @@ async function answerAll() {
   }
 }
 
+/** What actually happened, in the words the user needs to hear.
+ *
+ * A choice field's `wrote` is the option that got clicked, not the text we sent,
+ * so measuring it against the answer would report a truncation that never
+ * happened — "truncated to 6 of 18 characters" for a perfectly ticked box. */
+function filledMessage(field, trace, res) {
+  const check = ' Check it before you submit.'
+  if (field.type === 'checkbox') {
+    return `${res.wrote[0].toUpperCase()}${res.wrote.slice(1)}.${check}`
+  }
+  if (field.multi || field.type === 'radio' || field.type === 'select') {
+    const missed = res.unmatched?.length ? ` No option matched ${res.unmatched.join(', ')}.` : ''
+    const unsure = res.unconfirmed ? ' The page did not confirm the click.' : ''
+    return `Picked "${res.wrote}".${missed}${unsure}${check}`
+  }
+  if (res.wrote.length < trace.answer.length) {
+    return `Filled, but the page truncated it to ${res.wrote.length} of ${trace.answer.length} characters.`
+  }
+  return `Filled.${check}`
+}
+
 async function fillOne(field, trace) {
   try {
     const res = await send('fill', {
@@ -229,13 +333,7 @@ async function fillOne(field, trace) {
       fieldClass: trace.field?.field_class,
     })
     if (res?.ok) {
-      const truncated = res.wrote.length < trace.answer.length
-      state.results.set(field.key, {
-        trace,
-        filled: truncated
-          ? `Filled, but the page truncated it to ${res.wrote.length} of ${trace.answer.length} characters.`
-          : 'Filled. Check it before you submit.',
-      })
+      state.results.set(field.key, { trace, filled: filledMessage(field, trace, res) })
     } else {
       state.results.set(field.key, { trace, error: res?.reason || 'could not fill' })
     }
@@ -250,7 +348,31 @@ async function fillOne(field, trace) {
 async function loadSettings() {
   const values = await send('settings')
   $('backend').value = values.backend
+  $('page').value = values.page
   $('mode').value = values.mode
+}
+
+/** The profile page opens in a tab, and an already-open one is reused rather than
+ * duplicated: two tabs editing the same memory is how one of them saves over the
+ * other's work without either knowing. */
+$('openProfile').onclick = async () => {
+  const { page } = await send('settings')
+  // Filtering by url needs a host permission for it, and the URL is a setting the
+  // user can point anywhere — so a failed or empty query falls through to opening
+  // a new tab rather than doing nothing.
+  let existing = []
+  try {
+    existing = await chrome.tabs.query({ url: `${page.replace(/\/$/, '')}/*` })
+  } catch {
+    /* no permission for that host — open a fresh tab below */
+  }
+  if (existing.length > 0) {
+    await chrome.tabs.update(existing[0].id, { active: true })
+    await chrome.windows.update(existing[0].windowId, { focused: true })
+  } else {
+    await chrome.tabs.create({ url: page })
+  }
+  window.close()
 }
 
 $('settingsToggle').onclick = () => {
@@ -260,7 +382,11 @@ $('settingsToggle').onclick = () => {
 $('settings').onsubmit = async (event) => {
   event.preventDefault()
   await send('saveSettings', {
-    values: { backend: $('backend').value.replace(/\/$/, ''), mode: $('mode').value },
+    values: {
+      backend: $('backend').value.replace(/\/$/, ''),
+      page: $('page').value.replace(/\/$/, ''),
+      mode: $('mode').value,
+    },
   })
   $('settings').hidden = true
   await checkHealth()
@@ -272,6 +398,7 @@ $('endSession').onclick = async () => {
   await send('endSession', { tabId: state.tabId })
   state.results.clear()
   $('endSession').hidden = true
+  showJd(null)
   render()
 }
 
@@ -281,5 +408,6 @@ $('endSession').onclick = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   state.tabId = tab?.id ?? null
   await loadSettings()
+  await loadJd()
   await checkHealth()
 })()

@@ -1,8 +1,10 @@
 # Status
 
-Where the project actually is. Updated 2026-09-04.
+Where the project actually is. Updated 2026-09-07.
 
-Tests: **432 backend** (`server/`), **31 extension** (`extension/`). All passing.
+Tests: **475 backend** (`server/`), **72 extension** (`extension/`). All passing.
+The page (`viewer/`) has no tests of its own — it typechecks and builds, and every
+rule it depends on is tested on the backend side.
 
 The rule for this file: a thing is *done* only if it works end to end and has a
 test that would fail if it broke. Everything else is in "Not done", even if code
@@ -58,6 +60,44 @@ you cannot see, and rebuilding is milliseconds.
   is refused. This is the single rule that keeps the generator from inventing a
   job you never had.
 
+### Hand editing
+
+`pipeline/edit.py` plus seven endpoints. The gap it closed: the API could add
+records and wipe all of memory, and nothing in between — so one misread job title
+meant clearing everything and re-uploading, which in practice means leaving the
+wrong title in and grounding the rest of the application on it.
+
+| Endpoint | What it does |
+|---|---|
+| `PATCH /memory/records/{id}` | Supersede a job, degree, project or certificate with a corrected copy |
+| `DELETE /memory/records/{id}` | Retract it — out of retrieval, still on disk |
+| `PATCH /memory/profile` | Contact details, links, work authorisation, preferences |
+| `PATCH /memory/identity` | Legal name. Locked, so a change needs `?unlock=true` |
+| `POST` / `PATCH` / `DELETE /memory/skills` | Add, fix a typo in, or drop a declared skill |
+
+The decisions worth knowing:
+
+- **Retraction is a third state** (`retracted_at`), not a delete and not a
+  supersede — there is no replacement record to point at.
+- **A corrected record is inserted directly after the one it replaces**, not
+  appended. Insertion order *is* the résumé's order: `load_memory` reloads by it
+  and "my last two jobs" reads it, so appending would quietly move a corrected job
+  to the bottom of your history.
+- **Absent and `null` are different.** `end: null` means "this is my current job";
+  absent means "leave it alone". `model_fields_set` is what tells them apart, so no
+  patch field may be read with a truthiness check.
+- **An unchanged bullet keeps its id, its metrics and its skill links.** Rewriting
+  the whole list on every save would break every L3 chunk id, and the page would
+  look identical while retrieval quietly changed underneath it.
+- **A bullet you typed is `USER_ENTERED`,** so the verbatim guard does not apply.
+  The guard exists to catch *model* prose accepted unchanged; a sentence you wrote
+  about your own career is the best evidence in the system.
+- **Work authorisation and preferences can only arrive here.** `/confirm` refuses
+  them on purpose — a résumé does not state them — and typing one *is* its
+  confirmation, so the staleness prompt does not fire on a field just filled in.
+- **L3/L4 are rebuilt on every edit**, or the page shows the new wording while
+  answers cite the old one.
+
 ### Classification
 
 A four-tier cascade in `pipeline/classify.py`, cheapest first:
@@ -86,11 +126,21 @@ A four-tier cascade in `pipeline/classify.py`, cheapest first:
 
 ### Persistence
 
-One SQLite file (`server/data/jobsync.db`). Layers L0–L2, L5 and staged
-documents are stored; L3/L4 are rebuilt. A save makes the database *match* the
+One SQLite file (`server/data/jobsync.db`). Layers L0–L2, L5, staged documents
+and L6 sessions are stored; L3/L4 are rebuilt. A save makes the database *match* the
 store exactly, including deleting rows the store no longer holds — otherwise
 loading a different profile leaves the previous person's employment behind, and a
 restart resurrects them next to the real ones. There's a test for exactly that.
+
+**Sessions persist too** (migration v2). They are not memory and are never merged
+into it, but a session holds the job description you pasted, every answer already
+given, and the spent-evidence counter that stops page 6 retelling page 2's story
+— half an hour of work that a restart used to delete. `jd_fingerprint` is a real
+column because reattaching after navigation looks a session up by it: Workday's
+URL changes on every wizard step.
+
+Every restart test uses a fresh store *and* a real file on disk. Reusing the
+in-process singletons is how you ship a persistence layer that persists nothing.
 
 ### Extension
 
@@ -101,16 +151,62 @@ restart resurrects them next to the real ones. There's a test for exactly that.
   Workday, Ashby and hand-rolled React forms emit. This is the load-bearing part:
   `context_label` is the entire interface to the backend, and a bad label routes a
   real question to ATTESTATION and abstains.
+- **The scan follows ARIA roles, not tag names.** Google Forms, Microsoft Forms
+  and most React design systems build radios, checkboxes and dropdowns out of
+  `<div role="…">` — a scan restricted to `input, textarea, select` returns *zero*
+  fields on an eight-question Google Form. Roles are the contract a form has to
+  honour for a screen reader, so anything a blind user can fill, the scan finds.
+- **Shadow DOM is crossed**, including for id lookups (`getRootNode()`), because
+  Workday and Salesforce design systems put their inputs in open shadow roots.
+- **Choices are filled by clicking, then read back.** There is no way to "set" a
+  div radio, and setting `.checked` on a native one leaves the framework unaware.
+  So: click, poll for the state to change, and say so when it never does — never
+  claim an answer the page did not accept. Matching is word-level rather than
+  substring, because "no" is a substring of "Not applicable".
+- Radio groups, checkbox groups (multi-select), native `<select>` and div
+  comboboxes, plus a lone checkbox treated as yes/no.
+- **The job description is read off the page** (`src/jd.js`): JSON-LD `JobPosting`
+  first — the site promised that one to Google — then known platform containers,
+  then text density discounting link text. Finding nothing is an explicit outcome
+  you can see in the popup, and you can paste the JD by hand instead.
 - Scan, per-field fill, highlight-on-click, one session per tab.
 - React-safe writes via the prototype `value` setter plus a bubbling `input`
   event — assigning `.value` directly updates the pixels and nothing else.
-- Attestation fields get no fill button.
+- Attestation fields get no fill button, and `fill` refuses them a second time at
+  the point of the write.
 
-### Viewer
+### The profile page
 
-A React debug UI covering ingest, review, memory, sessions and traces. **This is
-a developer tool.** It exposes chunk scores, tag overlap and retrieval internals
-because that's what's useful while building. It is not the shipping UI.
+`viewer/` — React + Vite, served on its own at `:5173`, three screens.
+
+- **Add.** Drop a file or paste text, "Read it" structures it and writes nothing,
+  then a check-it-over list ticked by default. Bullets the guard could not find
+  word-for-word in your document are marked and editable, so the choice is "put it
+  in your own words" or "leave it out" rather than a silent drop.
+- **Profile.** Everything in memory, editable where you found it: identity (with
+  an unlock checkbox that appears only when a legal-name field actually changed),
+  contact details, work authorisation, preferences, and each job, degree, project
+  and certificate. Superseded and retracted records are filtered out of the view,
+  not out of the database.
+- **Settings.** What's switched on, where the file is and how many rows are in it,
+  why there is no API key box, and a two-step erase.
+
+It talks only to the backend, and so does the extension — no page↔extension
+channel, so they cannot disagree. The extension popup has a **Profile** button
+which reuses an already-open tab rather than opening a second one, because two
+tabs editing the same record means one silently supersedes the other's work.
+
+Two implementation notes that are easy to get wrong:
+
+- **A card saves as a whole, on a button, not per field on blur.** A save
+  supersedes the record, so blur-saving would leave one superseded copy behind per
+  box you tabbed through.
+- **`key={record.id}` on the cards is load-bearing.** A save returns a new id, so
+  the card remounts showing what was saved instead of a stale draft.
+
+The debug panels are gone — chunk scores, tag overlap, retrieval traces, session
+internals. They were useful while building the pipeline and are noise to anyone
+using it. `git log` has them if they are ever wanted back.
 
 ---
 
@@ -124,45 +220,43 @@ because that's what's useful while building. It is not the shipping UI.
 | **LLM competency tagger** | `memory/derive.py:164` `_TAG_HINTS` | Tags come from keyword matching. "trained them" produces `['mentorship']` and misses everything else. Must pick from the closed competency list. |
 | **Metric detection** | `pipeline/structure.py:544` `_METRIC_RE` | Misses `840ms`, `310ms`, `47 services` — so quantified achievements are treated as unquantified. |
 
-### The product UI — decided, not built
+### Gaps in the page
 
-The plan settled on: an **independently hosted page**, separate from the
-extension, talking to the same backend. Three screens and nothing else:
-
-1. **Upload** — drop CV and project docs.
-2. **Profile** — Experience / Projects / Education / Links / Other, every item
-   editable inline.
-3. **Settings** — API key, name and email, backend URL.
-
-Cut from what the viewer shows: chunk counts, retrieval scores, tag lists,
-evidence panels, `/health` internals, "answered from 3 sources". Nobody outside
-this repo cares.
-
-Not bundled inside the extension, and **not** wired directly to the extension
-either: page → backend, extension → backend, and they agree because the backend is
-the only source of truth. A direct page↔extension channel buys nothing and adds a
-second thing to debug.
-
-The catch-all "Other" section needs a **`Note` record type in L2**. L3 already
-has a `NOTE` entity type (`schemas/evidence.py:28`); the L2 side doesn't exist.
+- **No "Other" section.** The catch-all needs a **`Note` record type in L2**. L3
+  already has a `NOTE` entity type (`schemas/evidence.py:28`); the L2 side doesn't
+  exist, so there is nowhere to put a fact that isn't a job, a degree, a project or
+  a certificate.
+- **No history view.** Every correction is kept, and there is no screen that shows
+  you the chain. The data is all there; the "what did I say last time" question
+  currently needs a SQL client.
+- **Inferred skills cannot be edited**, correctly — they come from the bullets that
+  reference them, so the fix is editing the bullet. `GET /memory` returns
+  `declared_skills` separately from the merged graph so the page does not render a
+  remove button that 404s, but it does not yet explain *why* the button is missing.
+- **No tests.** It typechecks and builds. The rules it relies on are tested on the
+  backend, which is where they live, but nothing catches a screen that renders
+  blank.
+- **Not hosted anywhere.** `npm run dev` on your own machine. A built bundle needs
+  the API URL to stop being a dev-server proxy.
 
 ### Extension gaps
 
-- **Radio groups are scanned but never filled** — refused on purpose, since a
-  radio is usually a consent or an attestation. Whether that's the right call for
-  ordinary multiple-choice questions is untested.
-- **Multi-select isn't found at all.** Most ATS "multi-selects" aren't
-  `<select multiple>` — they're a React combobox built from divs with a hidden
-  input. The scan looks for `input, textarea, select` and sees nothing.
+- **No LLM fallback for labelling.** When the DOM cascade cannot explain a field,
+  the field is dropped. The plan is a pruned HTML skeleton sent to a new backend
+  endpoint and cached, so the model reads the page the way a person would. Until
+  then, a form that labels its questions only visually — by position, colour, or a
+  heading it never associates — is invisible to the scan.
 - **File uploads are skipped.** A value assignment cannot attach bytes, by design.
-- **No JD capture** — sessions are created with `jd_text: null`, so answers aren't
-  tailored to the specific posting.
 - **No per-field edit box**, which means nothing flows back to L5. The
   answer-memory flywheel isn't turning.
-- **Workday's shadow DOM** is out of reach of the current scan.
-- **Visibility checking is untested in a real browser.** jsdom does no layout, so
-  the test harness fakes `offsetParent` and bounding rects. The tests can't tell
-  you whether `isVisible` behaves on a real page.
+- **A JD behind a login is unreachable.** If the posting lives on a page the
+  extension never sees, `source` comes back `none` and you paste it by hand. That
+  is the honest outcome rather than a bug, but it is still a manual step.
+- **Everything DOM-facing is tested in jsdom, which does no layout.** The harness
+  fakes `offsetParent` and bounding rects, and simulates the framework that reacts
+  to a click. The tests say the logic is right; only a real browser says the page
+  agrees. Radio, multi-select and dropdown behaviour on live forms is being
+  checked by hand.
 - **No icons** — Chrome shows a grey puzzle piece.
 
 ### Retrieval and quality
@@ -175,11 +269,11 @@ has a `NOTE` entity type (`schemas/evidence.py:28`); the L2 side doesn't exist.
   already shaped for it. Not urgent at a few thousand chunks.
 - **No skill canonicalisation.** A typo'd skill (`Pyhton`) is stored as typed, and
   BM25 is keyword-based, so it silently stops matching a JD's `Python`. The damage
-  is invisibility, not a visible misspelling. Plan: store `name` (what you wrote)
-  alongside `canonical` (what it matched) against a closed vocabulary; retrieval
-  uses `canonical`; the LLM proposes and you confirm.
-- **Skills are toggle-only in review** (`viewer/src/ReviewPanel.tsx`) — a typo can
-  be dropped but not corrected.
+  is invisibility, not a visible misspelling. `PATCH /memory/skills/{id}` means you
+  can now fix one you spot — the id stays put because achievements point at it —
+  but spotting it is still on you. Plan: store `name` (what you wrote) alongside
+  `canonical` (what it matched) against a closed vocabulary; retrieval uses
+  `canonical`; the LLM proposes and you confirm.
 - **No multi-document dedup.** Loading twenty project files will produce twenty
   overlapping sets of records. L2 project records should also track "on résumé"
   vs "not".
@@ -193,6 +287,10 @@ has a `NOTE` entity type (`schemas/evidence.py:28`); the L2 side doesn't exist.
   manual, every time.
 - **Résumé and cover-letter generation.** The actual output artifact of the whole
   project, and it doesn't exist yet.
+- **Traces are not stored.** `TRACES` is an in-process list capped at 200, so the
+  explanation of why an answer came out the way it did dies with the process. Less
+  urgent than it sounds — a trace is a debugging aid, not the user's work — but it
+  means yesterday's application cannot be looked at.
 
 ### Going public
 
@@ -217,9 +315,10 @@ Not blockers for your own use; all of them blockers for anyone else's.
 
 ## Order of work
 
-1. **The three screens, locally.** Still single-user, still your machine. Get the
-   upload/edit loop pleasant before adding anything underneath it.
-2. **Radio and multi-select handling**, with manual testing against real forms.
+1. ~~**The three screens, locally.**~~ Done — the page and the edit endpoints
+   underneath it. The `Note` record type is the piece left over.
+2. **The LLM labelling fallback**, for the forms the DOM cascade cannot explain,
+   plus whatever the manual testing of radio and multi-select turns up.
 3. **Real generation** — replace `_generate_stub`. Everything downstream of it is
    already built and waiting.
 4. **LLM competency tagger** and skill canonicalisation, together — they're the

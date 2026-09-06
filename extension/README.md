@@ -12,9 +12,22 @@ No build step. The files are plain ES modules and load as they are.
    `extension/` directory.
 3. Open a job application, click the JobSync icon, **Scan this page**.
 
-If the backend is on a different port, change it in the popup's ⚙ settings and
-add that origin to `host_permissions` in `manifest.json` — Chrome will not let the
-worker reach a host the manifest has not declared, whatever the setting says.
+## The two URLs
+
+⚙ settings holds both, and they are separate because they are different things.
+
+| Setting | Default | What it is |
+| --- | --- | --- |
+| Backend | `http://127.0.0.1:8000` | The API. Every request goes here. |
+| Profile page | `http://127.0.0.1:5173` | The page the **Profile** button opens. The worker never fetches it. |
+
+Both origins are in `host_permissions`. If you move either, change it here *and*
+in `manifest.json` — Chrome will not let the worker reach a host the manifest has
+not declared, whatever the setting says.
+
+**Profile** reuses an already-open tab rather than opening a second one. Two tabs
+editing the same record means one silently supersedes the other's work, and the
+person doing it has no way to tell.
 
 ## Why there is no build step
 
@@ -28,9 +41,10 @@ thing the imports would have provided. If this grows a framework, add Vite then.
 | File | Job |
 | --- | --- |
 | `src/labels.js` | Works out what a field is asking. The cascade that decides whether any of this works. |
-| `src/fields.js` | Finds fillable fields, reads limits, writes values React will notice. |
+| `src/fields.js` | Finds fillable fields, reads limits, writes values React will notice, clicks choices and reads the page back. |
+| `src/jd.js` | Finds the job description on the page. JSON-LD first, then platform containers, then text density. |
 | `src/background.js` | The only thing that talks to the backend. Owns the L6 session per tab. |
-| `src/popup.js` | Renders fields, classifications, answers. Owns the two-click rule. |
+| `src/popup.js` | Renders fields, classifications, answers. Owns the two-click rule and the Profile button. |
 
 ## The design rules
 
@@ -53,16 +67,33 @@ directly updates the pixels and not React's state: the next render wipes it and
 validation still calls the field empty. `fields.js` uses the native setter and
 dispatches a bubbling `input` event, which is what a keystroke produces.
 
+**The scan follows ARIA roles, not tag names.** Google Forms, Microsoft Forms and
+most React design systems build radios, checkboxes and dropdowns out of
+`<div role="…">`; a scan restricted to `input, textarea, select` returns *zero*
+fields on an eight-question Google Form. Roles are the contract a form has to
+honour for a screen reader, so anything a blind user can fill, the scan finds.
+Shadow roots are crossed for the same reason — Workday and Salesforce put their
+inputs inside them.
+
+**A choice is filled by clicking, then read back.** There is no way to "set" a div
+radio, and setting `.checked` on a native one leaves the framework unaware. So:
+click, poll for the state to change, and say so when it never does — never claim
+an answer the page did not accept. Matching is word-level, not substring, because
+"no" is a substring of "Not applicable".
+
 ## Known gaps
 
-- **Checkboxes and radios are not filled.** Nearly all of them are consents or
-  attestations, and the rest are one click.
 - **File uploads are skipped.** Résumé attachment needs real bytes; a value
   assignment is impossible by design. Wiring this to the stored document is worth
   doing and is not done.
-- **No JD capture yet.** The session is created without one, so nothing is
-  tailored to the posting. Reading the JD off the page is the obvious next step.
+- **No LLM fallback for labelling.** When the cascade cannot explain a field, the
+  field is dropped. A form that labels its questions only visually — by position,
+  colour, or a heading it never associates — is invisible to the scan.
 - **No per-field edit box.** You can fill and then edit in the page, but the
   approval never reaches L5, so the answer-memory flywheel is not turning yet.
-- **Workday's shadow DOM.** `querySelectorAll` does not cross shadow roots, so
-  some Workday tenants will scan as empty.
+- **A JD behind a login is unreachable.** `source` comes back `none` and you paste
+  it into the popup by hand. Honest rather than broken, but still a manual step.
+- **jsdom does no layout.** The tests fake `offsetParent` and bounding rects and
+  simulate the framework that reacts to a click. They say the logic is right; only
+  a real browser says the page agrees.
+- **No icons** — Chrome shows a grey puzzle piece.

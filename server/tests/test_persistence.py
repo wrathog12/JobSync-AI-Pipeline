@@ -37,13 +37,19 @@ def server(db_file: Path | str, store: MemoryStore, fake: FakeClient | None = No
     from app.config import get_settings
     from app.ingest.store import DocumentStore
     from app.memory.candidates import CandidateStore
+    from app.memory.sessions import SessionStore
 
     path = str(db_file) if db_file else ""
     docs, cands = DocumentStore(), CandidateStore()
+    # A fresh SessionStore as well, for the same reason as the others: the module
+    # singleton would carry live sessions across the "restart" and every assertion
+    # about L6 surviving would pass without a byte reaching disk.
+    sessions = SessionStore()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(main, "get_store", lambda: store)
         mp.setattr(main, "get_documents", lambda: docs)
         mp.setattr(main, "get_candidates", lambda: cands)
+        mp.setattr(main, "get_sessions", lambda: sessions)
         mp.setattr(
             main,
             "get_settings",
@@ -360,3 +366,141 @@ def test_a_second_identity_row_is_impossible(db_file):
                 "INSERT INTO identity (id, locked, data, updated_at) VALUES (2, 0, '{}', '')"
             )
     close_db()
+
+
+# ── L6: the application in progress ────────────────────────────────────────────
+#
+# Sessions are not memory and are never merged into it. What a restart used to
+# destroy here was the user's *work*: the description they pasted by hand, every
+# answer already given, and the spent-evidence ledger that stops page 6 retelling
+# page 2's story. A Workday application is filled over half an hour, and this was
+# the only thing in the system the user could not cheaply redo.
+
+
+JD = (
+    "Staff Backend Engineer. You will own the ingestion pipeline end to end, from "
+    "parsing uploaded documents through to the retrieval layer. Required: five "
+    "years of Python and production experience with retrieval systems."
+)
+
+
+def open_session(client, **kw) -> str:
+    res = client.post("/sessions", json={"mode": "strict", **kw})
+    assert res.status_code == 200, res.text
+    return res.json()["session_id"]
+
+
+def test_a_pasted_job_description_survives_a_restart(db_file):
+    """The one piece of session state that cannot be recovered from the page. On a
+    Workday wizard the posting is out of the DOM by page 4, so if this is lost the
+    user has to go and find the advert again mid-application."""
+    with server(db_file, MemoryStore()) as client:
+        session_id = open_session(client, company="Northwind Labs")
+        res = client.post(f"/sessions/{session_id}/jd", json={"jd_text": JD})
+        fingerprint = res.json()["jd_fingerprint"]
+
+    with server(db_file, MemoryStore()) as client:
+        session = client.get(f"/sessions/{session_id}").json()
+
+    assert session["jd_text"] == JD
+    assert session["company"] == "Northwind Labs"
+    assert session["jd_fingerprint"] == fingerprint, (
+        "the fingerprint is how the extension reattaches after navigation — "
+        "a different one after a restart is a session the page can no longer find"
+    )
+
+
+def test_the_page_number_and_the_answers_already_given_come_back(db_file):
+    """Answering the same question twice is not harmless: the second answer is
+    written without knowing the first exists, so a two-page form can contradict
+    itself in the user's own words."""
+    with server(db_file, MemoryStore()) as client:
+        session_id = open_session(client, jd_text=JD)
+        client.post(
+            "/answer",
+            json={
+                "question": "Why do you want this role?",
+                "field_type": "textarea",
+                "session_id": session_id,
+            },
+        )
+        client.post(f"/sessions/{session_id}/next-page", params={"page_url": "https://x/page2"})
+
+    with server(db_file, MemoryStore()) as client:
+        session = client.get(f"/sessions/{session_id}").json()
+
+    assert session["page_index"] == 1
+    assert session["pages_seen"] == ["https://x/page2"]
+    assert [a["question"] for a in session["answered"]] == ["Why do you want this role?"]
+
+
+def test_spent_evidence_survives_so_a_later_page_does_not_repeat_itself(db_file):
+    """`spent_chunks` is what makes page 6 tell a different story from page 2. It
+    is a counter, and a counter that resets is worse than no counter: the user
+    watches the same achievement come back in the answer they thought was new."""
+    from app.schemas.session import AnsweredField, field_key
+
+    with server(db_file, MemoryStore()) as client:
+        from app import main
+
+        session_id = open_session(client, jd_text=JD)
+        main.get_sessions().get(session_id).record(
+            AnsweredField(
+                field_key=field_key("Tell us about a project."),
+                question="Tell us about a project.",
+                answer="I rebuilt the ingestion pipeline.",
+                mode="strict",
+                trace_id="tr_test",
+                used_chunks=["ev_pipeline", "ev_python"],
+            )
+        )
+        # A write to the session object alone reaches nothing; an endpoint has to
+        # save it. That is exactly the coupling this test is here to hold.
+        client.post(f"/sessions/{session_id}/next-page")
+
+    with server(db_file, MemoryStore()) as client:
+        session = client.get(f"/sessions/{session_id}").json()
+
+    assert session["spent_chunks"] == {"ev_pipeline": 1, "ev_python": 1}
+
+
+def test_a_dropped_session_does_not_come_back(db_file):
+    """The user closing an application means it is finished with. A restart that
+    resurrects it puts a stale JD back in front of the next one they open."""
+    with server(db_file, MemoryStore()) as client:
+        session_id = open_session(client, jd_text=JD)
+        assert client.delete(f"/sessions/{session_id}").json()["dropped"] is True
+
+    with server(db_file, MemoryStore()) as client:
+        assert client.get(f"/sessions/{session_id}").status_code == 404
+        assert client.get("/sessions").json() == []
+
+
+def test_the_order_sessions_were_started_in_survives(db_file):
+    """The store evicts the oldest when it is full. Loading them back in a
+    different order would make a restart quietly discard the wrong application."""
+    with server(db_file, MemoryStore()) as client:
+        first = open_session(client, company="First")
+        second = open_session(client, company="Second")
+        third = open_session(client, company="Third")
+
+    with server(db_file, MemoryStore()) as client:
+        listed = [s["session_id"] for s in client.get("/sessions").json()]
+
+    assert listed == [third, second, first], "newest first, as it was before the restart"
+
+
+def test_health_counts_the_sessions_on_disk(db_file):
+    with server(db_file, MemoryStore()) as client:
+        open_session(client, jd_text=JD)
+        open_session(client)
+        assert client.get("/health").json()["storage"]["session"] == 2
+
+
+def test_sessions_still_work_with_storage_off(tmp_path):
+    """Storage off is a supported configuration. Sessions are the layer most likely
+    to be exercised in it, since it is the one that needs no uploaded documents."""
+    with server("", MemoryStore()) as client:
+        session_id = open_session(client, jd_text=JD)
+        assert client.get(f"/sessions/{session_id}").json()["jd_text"] == JD
+    assert list(tmp_path.iterdir()) == []

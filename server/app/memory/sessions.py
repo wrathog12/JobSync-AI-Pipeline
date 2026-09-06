@@ -1,13 +1,22 @@
-"""In-memory registry of live L6 sessions.
+"""The registry of live L6 sessions.
 
-Phase 1 keeps these in a process dict, which is correct for now and wrong later:
-they vanish on restart, and they don't survive more than one server process. That
-is an acceptable trade while the extension doesn't exist yet — a session is
-short-lived (one application) and cheap to rebuild.
+A process dict, mirrored to the `session` table by the endpoints that change one
+(see `db/repository.save_session`). The dict is still the source of truth in
+process; the table is what makes a restart invisible.
+
+That mirroring is not tidiness. An application is filled over half an hour, and a
+session holds the job description the user pasted, every answer already given, and
+the spent-evidence ledger that stops page 6 retelling page 2's story. Losing it to
+a restart was the one failure in this system that destroyed work the user could not
+cheaply redo — and it got worse the moment the JD became something they type in by
+hand.
+
+Sessions are still sealed off from L0-L5: nothing here is ever merged into memory,
+and `test_session_never_writes_to_durable_memory` is what keeps it that way.
 
 PHASE 2 TASK: the extension's background service worker becomes the owner of
-session state, with the server holding it only as a cache. A half-filled Workday
-application that dies because the server restarted is a genuinely bad experience.
+session state, with the server holding it only as a cache. That matters for a
+second device, not for a restart.
 """
 
 from __future__ import annotations
@@ -45,6 +54,12 @@ class SessionStore:
         self._sessions[session.session_id] = session
         self._evict()
         return session
+
+    def put(self, session: ApplicationSession) -> None:
+        """Insert a session exactly as given. For the loader restoring one from
+        disk — `create` mints a new id, which would orphan the stored row."""
+        self._sessions[session.session_id] = session
+        self._evict()
 
     def get(self, session_id: str | None) -> ApplicationSession | None:
         return self._sessions.get(session_id) if session_id else None

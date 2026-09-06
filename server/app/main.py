@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import get_settings
 from .db import close_db, get_db, open_db
@@ -18,6 +18,7 @@ from .memory.candidates import get_candidates
 from .memory.sessions import get_sessions
 from .memory.store import get_store
 from .pipeline import answer as answer_pipeline
+from .pipeline import edit as edit_memory
 from .pipeline.confirm import ConfirmRequest, confirm
 from .pipeline.structure import structure_document
 from .schemas.common import MODE_DESCRIPTION, MODE_MAX_CLAIM_DISTANCE, GenerationMode
@@ -38,9 +39,23 @@ class SessionCreate(BaseModel):
     origin: str | None = None
 
 
+class JdUpdate(BaseModel):
+    #: The ceiling is a sanity check, not a limit anyone will meet: a long job
+    #: description is about a thousand words.
+    jd_text: str = Field(max_length=60000)
+    company: str | None = None
+    role_title: str | None = None
+
+
 class PasteRequest(BaseModel):
     text: str
     filename: str | None = None
+
+
+class SkillWrite(BaseModel):
+    """Adding a skill and renaming one take the same body: just the name."""
+
+    name: str = Field(max_length=80)
 
 
 log = logging.getLogger("jobsync")
@@ -57,8 +72,16 @@ async def lifespan(app: FastAPI):  # noqa: ANN201
     db = open_db(get_settings().db_path)
     if db is not None:
         found = store_db.load_all(get_store(), get_documents(), get_candidates(), db)
+        # Applications in progress come back too. An unfinished Workday form is
+        # half an hour of the user's work, and until this line a server restart
+        # threw away the job description they had pasted into it.
+        restored = store_db.load_sessions(get_sessions(), db)
         log.info(
-            "storage: %s (%s)", db.path, "restored existing memory" if found else "empty"
+            "storage: %s (%s, %d session%s in progress)",
+            db.path,
+            "restored existing memory" if found else "empty",
+            restored,
+            "" if restored == 1 else "s",
         )
     else:
         log.warning("storage: disabled — nothing you confirm will survive a restart")
@@ -97,6 +120,17 @@ MAX_TRACES = 200
 def _persist_memory() -> None:
     if (db := get_db()) is not None:
         store_db.save_memory(get_store(), db)
+
+
+def _persist_session(session) -> None:  # noqa: ANN001 — ApplicationSession
+    """Mirror one session to disk. Called by every endpoint that changes one.
+
+    Per session rather than "save them all": the write happens on the answer path,
+    which is the hot one, and rewriting ninety-nine untouched applications to
+    record one answer is the kind of cost that turns into a mystery later.
+    """
+    if (db := get_db()) is not None:
+        store_db.save_session(session, db)
 
 
 @app.get("/health")
@@ -198,12 +232,22 @@ def llm_status(api_key: str | None = None) -> dict:
 
 @app.get("/memory")
 def memory() -> dict:
+    """Everything memory holds, for a page that shows it and lets it be edited.
+
+    `skills` is the merged graph — declared skills plus the ones inferred from the
+    achievements that reference them. `declared_skills` is the subset the user
+    actually listed, and it is reported separately because it is the only subset
+    that can be renamed or removed: an inferred skill exists because a bullet
+    points at it, so the honest way to drop one is to edit that bullet. A page
+    given only the merged list would offer a delete button that 404s.
+    """
     store = get_store()
     return {
         "identity": store.identity.model_dump(mode="json") if store.identity else None,
         "profile": store.profile.model_dump(mode="json") if store.profile else None,
         "ledger": store.ledger.model_dump(mode="json"),
         "skills": [s.model_dump(mode="json") for s in store.graph.skills],
+        "declared_skills": [s.model_dump(mode="json") for s in store.declared_skills],
         "evidence": [
             {
                 "chunk_id": c.chunk_id,
@@ -251,6 +295,117 @@ def clear_memory() -> dict:
     return {"cleared": True, "memory_empty": store.is_empty, "memory": store.stats()}
 
 
+# ── editing memory by hand ─────────────────────────────────────────────────────
+#
+# Until these existed the API could add records and wipe everything, with nothing
+# in between: one misread job title meant clearing all of memory and re-uploading
+# the résumé. See `pipeline/edit.py` for why an edit appends rather than mutates.
+
+
+def _edited(payload: dict) -> dict:
+    """Save, then answer with the payload plus fresh stats.
+
+    Persisting here rather than in each endpoint keeps "changed memory" and "wrote
+    to disk" the same line of code — an edit the user watched succeed and then lost
+    to a restart is the worst thing this group of endpoints could do.
+    """
+    _persist_memory()
+    return {**payload, "memory": get_store().stats()}
+
+
+def _refuse(exc: edit_memory.EditError) -> HTTPException:
+    return HTTPException(status_code=exc.status, detail=exc.message)
+
+
+@app.patch("/memory/identity")
+def patch_identity(body: edit_memory.IdentityPatch, unlock: bool = False) -> dict:
+    """Set or correct the legal name. Locked afterwards; changing it needs `unlock`."""
+    try:
+        identity = edit_memory.edit_identity(body, get_store(), unlock=unlock)
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"identity": identity.model_dump(mode="json")})
+
+
+@app.patch("/memory/profile")
+def patch_profile(body: edit_memory.ProfilePatch) -> dict:
+    """Contact details, links, work authorization and preferences.
+
+    Authorization and preferences can *only* be set here. A résumé does not state
+    them, so `/confirm` refuses them — but they have to be enterable somewhere, and
+    by hand is the only honest way in.
+    """
+    try:
+        profile = edit_memory.edit_profile(body, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"profile": profile.model_dump(mode="json")})
+
+
+@app.patch("/memory/records/{record_id}")
+def patch_record(record_id: str, body: edit_memory.RecordPatch) -> dict:
+    """Correct one ledger record. The old one is kept, flagged, out of retrieval.
+
+    The response carries both ids because the corrected record is a *new* record —
+    a client holding the old id needs to know what replaced it rather than
+    discovering on its next request that the thing it was editing is inactive.
+    """
+    try:
+        old, new = edit_memory.edit_record(record_id, body, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited(
+        {
+            "record": new.model_dump(mode="json"),
+            "superseded": old.id,
+            "evidence_chunks": len(get_store().evidence.chunks),
+        }
+    )
+
+
+@app.delete("/memory/records/{record_id}")
+def retract_record(record_id: str) -> dict:
+    """Take a record out of retrieval. Not a delete — nothing is removed from disk."""
+    try:
+        record = edit_memory.retract_record(record_id, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited(
+        {
+            "retracted": record.id,
+            "evidence_chunks": len(get_store().evidence.chunks),
+        }
+    )
+
+
+@app.post("/memory/skills")
+def create_skill(body: SkillWrite) -> dict:
+    try:
+        skill = edit_memory.add_skill(body.name, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"skill": skill.model_dump(mode="json")})
+
+
+@app.patch("/memory/skills/{skill_id}")
+def patch_skill(skill_id: str, body: SkillWrite) -> dict:
+    """Fix a typo. `Pyhton` never matches a JD's `Python`, and nothing looks wrong."""
+    try:
+        skill = edit_memory.rename_skill(skill_id, body.name, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"skill": skill.model_dump(mode="json")})
+
+
+@app.delete("/memory/skills/{skill_id}")
+def delete_skill(skill_id: str) -> dict:
+    try:
+        skill = edit_memory.remove_skill(skill_id, get_store())
+    except edit_memory.EditError as exc:
+        raise _refuse(exc) from exc
+    return _edited({"removed": skill.id})
+
+
 @app.post("/answer")
 def generate_answer(req: AnswerRequest) -> dict:
     store = get_store()
@@ -258,6 +413,10 @@ def generate_answer(req: AnswerRequest) -> dict:
     if req.session_id and session is None:
         raise HTTPException(status_code=404, detail="unknown session_id")
     trace = answer_pipeline.run(req, store, session)
+    # The session recorded this answer and spent the evidence behind it. Both are
+    # what stop the next page repeating this one, so they are saved with it.
+    if session is not None:
+        _persist_session(session)
     TRACES.insert(0, trace)
     del TRACES[MAX_TRACES:]
     return trace.model_dump_view()
@@ -490,6 +649,7 @@ def create_session(body: SessionCreate) -> dict:
         role_title=body.role_title,
         origin=body.origin,
     )
+    _persist_session(session)
     return session.model_dump(mode="json")
 
 
@@ -506,6 +666,52 @@ def get_session(session_id: str) -> dict:
     return session.model_dump(mode="json")
 
 
+@app.post("/sessions/{session_id}/jd")
+def set_session_jd(session_id: str, body: JdUpdate) -> dict:
+    """Attach the job description to a session that already exists.
+
+    The JD almost always arrives *after* the session does. The extension opens a
+    session on the first question it answers, while the description lives on a page
+    the user may read later or paste by hand — and on a Workday wizard it is gone
+    from the DOM by page 4. Without this endpoint a session opened without a JD
+    could never acquire one, and every answer for that application would be written
+    for the role in general rather than for this posting.
+
+    Replacing a JD is allowed and reported. Answers already given were written
+    against the old one and this call does not revise them, so the count of what is
+    now stale is part of the response rather than a surprise later.
+    """
+    session = get_sessions().get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="unknown session_id")
+
+    text = body.jd_text.strip()
+    if len(text) < 40:
+        raise HTTPException(
+            status_code=400,
+            detail="that is too short to be a job description — paste the posting itself",
+        )
+
+    before = session.jd_fingerprint
+    session.set_jd(text)
+    # Only ever filled in, never blanked: a guess from the page is better than
+    # nothing, and a session with no company on it is unidentifiable in a list.
+    if body.company:
+        session.company = body.company
+    if body.role_title:
+        session.role_title = body.role_title
+
+    replaced = bool(before and before != session.jd_fingerprint)
+    # Before returning, not after: a JD the user pasted by hand is the one piece of
+    # session state they cannot reproduce from the page.
+    _persist_session(session)
+    return {
+        **session.model_dump(mode="json"),
+        "replaced": replaced,
+        "stale_answers": len(session.answered) if replaced else 0,
+    }
+
+
 @app.post("/sessions/{session_id}/next-page")
 def next_page(session_id: str, page_url: str | None = None) -> dict:
     """Advance the wizard. Answers and spent evidence carry across the boundary."""
@@ -513,12 +719,18 @@ def next_page(session_id: str, page_url: str | None = None) -> dict:
     if session is None:
         raise HTTPException(status_code=404, detail="unknown session_id")
     session.advance_page(page_url)
+    _persist_session(session)
     return session.model_dump(mode="json")
 
 
 @app.delete("/sessions/{session_id}")
 def drop_session(session_id: str) -> dict:
-    return {"dropped": get_sessions().drop(session_id)}
+    dropped = get_sessions().drop(session_id)
+    # Unconditionally, even when the session was not in memory: a stored row for a
+    # session the process has already forgotten would come back on the next restart.
+    if (db := get_db()) is not None:
+        store_db.delete_session(session_id, db)
+    return {"dropped": dropped}
 
 
 @app.get("/traces")

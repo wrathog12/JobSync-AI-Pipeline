@@ -1,6 +1,8 @@
-/* Deliberately close to the trace viewer's palette: the same three field classes
- * carry the same three colours in both, so "attestation" is recognisable without
- * reading the word. */
+/* Dark, and its own palette. It used to match the trace viewer deliberately, so a
+ * field class was the same colour in both; that viewer is gone and the profile page
+ * that replaced it is a light form with no field classes to match. What survives is
+ * the part that earned its keep: green / blue / amber down the left edge, so
+ * "attestation" is recognisable without reading the word. */
 
 :root {
   --bg: #11141a;
@@ -75,6 +77,8 @@ h1 {
   display: flex;
   gap: 6px;
   margin-bottom: 10px;
+  /* Four buttons at 420px is tight, and a clipped one is worse than a wrapped one. */
+  flex-wrap: wrap;
 }
 
 .btn {
@@ -116,13 +120,32 @@ h1 {
   color: var(--muted);
 }
 .settings input,
-.settings select {
+.settings select,
+.settings textarea {
   width: 100%;
   padding: 6px 8px;
   border-radius: 5px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
+  font: inherit;
+}
+
+/* The job description block. Above the fields, because an application answered
+   without one is answered for a job in general. */
+.jd {
+  margin-bottom: 10px;
+}
+.jd .bar {
+  margin-bottom: 4px;
+}
+.jd .muted {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.jd textarea {
+  resize: vertical;
   font: inherit;
 }
 

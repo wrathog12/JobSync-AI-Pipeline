@@ -7,6 +7,7 @@ evidence chunks, and its stable `id` is the foreign key those chunks carry home.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -32,10 +33,22 @@ class LedgerRecord(BaseModel):
         default=None,
         description="Set when corrected. Superseded records are excluded from retrieval.",
     )
+    retracted_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Removed by the user, with nothing replacing it — a job they never had, "
+            "read out of a reference. Excluded from retrieval, kept on disk: an "
+            "application already submitted may have been built on it."
+        ),
+    )
 
     @property
     def is_active(self) -> bool:
-        return self.superseded_by is None
+        """Retracted counts as inactive. A record with no `superseded_by` used to be
+        active by definition, so retraction had to be a second flag rather than a
+        sentinel id — an id field holding the word "removed" is the kind of thing
+        that reads fine until something tries to resolve it."""
+        return self.superseded_by is None and self.retracted_at is None
 
 
 class Achievement(BaseModel):

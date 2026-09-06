@@ -21,16 +21,26 @@ import { fileURLToPath } from 'node:url'
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
 
+/** Up one level, crossing a shadow boundary. The top element of a shadow root
+ * has no `parentElement` — its parent is the ShadowRoot — so a plain walk stops
+ * dead there and reports everything inside a shadow root as invisible. */
+const up = (node) => node.parentElement || node.parentNode?.host || null
+
 function fakeLayout() {
   Object.defineProperty(window.HTMLElement.prototype, 'offsetParent', {
     configurable: true,
     get() {
-      for (let el = this; el; el = el.parentElement) {
+      // A detached node has no offset parent in a real browser either, and the
+      // scan relies on that to notice the page changed under it.
+      if (!this.isConnected) return null
+      for (let el = this; el; el = up(el)) {
         if (el.style?.display === 'none' || el.hidden) return null
       }
-      return this.parentElement
+      return up(this) || document.body
     },
   })
+  // jsdom has no scrolling at all, so this does not exist to be called.
+  window.Element.prototype.scrollIntoView = function () {}
   window.Element.prototype.getBoundingClientRect = function () {
     const hidden = this.offsetParent === null
     return {
@@ -50,7 +60,7 @@ let loaded = false
 export function page(html) {
   if (!loaded) {
     fakeLayout()
-    for (const file of ['labels.js', 'fields.js']) {
+    for (const file of ['labels.js', 'fields.js', 'jd.js']) {
       // Indirect eval, so the script runs in global scope exactly as an injected
       // classic script does.
       // eslint-disable-next-line no-eval
@@ -61,7 +71,17 @@ export function page(html) {
   document.body.innerHTML = html
 }
 
+/** Attach an open shadow root to `selector` and fill it. Real ATS design systems
+ * put their inputs in one, so a scan that cannot see inside finds nothing. */
+export function shadow(selector, html) {
+  const host = document.querySelector(selector)
+  const root = host.attachShadow({ mode: 'open' })
+  root.innerHTML = html
+  return root
+}
+
 export const scan = () => window.JobSyncFields.scan()
+export const readJd = () => window.JobSyncJD.read()
 export const fill = (...args) => window.JobSyncFields.fill(...args)
 export const resolve = (selector) =>
   window.JobSyncLabels.resolve(document.querySelector(selector))

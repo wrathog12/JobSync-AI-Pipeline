@@ -7,10 +7,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // Same-origin in dev, so no CORS surprises when the extension talks to it later.
-      // Override with API_PORT when 8000 is occupied — on Windows a killed uvicorn
-      // can leave the port bound to a PID that no longer exists.
+      // 8000 is the port the README and the extension's own default both name, so the
+      // three agree by default. Override with API_PORT when 8000 is occupied — on
+      // Windows a killed uvicorn can leave the port bound to a PID that no longer
+      // exists, and then nothing here works and nothing says why.
       '/api': {
-        target: `http://127.0.0.1:${process.env.API_PORT ?? 8011}`,
+        target: `http://127.0.0.1:${process.env.API_PORT ?? 8000}`,
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/api/, ''),
       },
