@@ -219,6 +219,27 @@ async function answerAll() {
   }
 }
 
+/** What actually happened, in the words the user needs to hear.
+ *
+ * A choice field's `wrote` is the option that got clicked, not the text we sent,
+ * so measuring it against the answer would report a truncation that never
+ * happened — "truncated to 6 of 18 characters" for a perfectly ticked box. */
+function filledMessage(field, trace, res) {
+  const check = ' Check it before you submit.'
+  if (field.type === 'checkbox') {
+    return `${res.wrote[0].toUpperCase()}${res.wrote.slice(1)}.${check}`
+  }
+  if (field.multi || field.type === 'radio' || field.type === 'select') {
+    const missed = res.unmatched?.length ? ` No option matched ${res.unmatched.join(', ')}.` : ''
+    const unsure = res.unconfirmed ? ' The page did not confirm the click.' : ''
+    return `Picked "${res.wrote}".${missed}${unsure}${check}`
+  }
+  if (res.wrote.length < trace.answer.length) {
+    return `Filled, but the page truncated it to ${res.wrote.length} of ${trace.answer.length} characters.`
+  }
+  return `Filled.${check}`
+}
+
 async function fillOne(field, trace) {
   try {
     const res = await send('fill', {
@@ -229,13 +250,7 @@ async function fillOne(field, trace) {
       fieldClass: trace.field?.field_class,
     })
     if (res?.ok) {
-      const truncated = res.wrote.length < trace.answer.length
-      state.results.set(field.key, {
-        trace,
-        filled: truncated
-          ? `Filled, but the page truncated it to ${res.wrote.length} of ${trace.answer.length} characters.`
-          : 'Filled. Check it before you submit.',
-      })
+      state.results.set(field.key, { trace, filled: filledMessage(field, trace, res) })
     } else {
       state.results.set(field.key, { trace, error: res?.reason || 'could not fill' })
     }

@@ -11,7 +11,31 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { only, page, scan, shadow } from './helpers.js'
+import { fill, only, page, scan, shadow } from './helpers.js'
+
+/** Make the div widgets in a fixture behave like the framework that built them.
+ *
+ * jsdom dispatches the click and then nothing happens, because the "radio" is a
+ * div and the state lives in a React component that is not here. Without this the
+ * fill tests would assert only that we dispatched an event, which is the half that
+ * was never in doubt — what matters is that the read-back afterwards sees the
+ * change, and that requires something to actually change. */
+function reactive(selector = 'body') {
+  const scope = document.querySelector(selector)
+  for (const el of scope.querySelectorAll('[role="radio"]')) {
+    el.addEventListener('click', () => {
+      const group = el.closest('[role="radiogroup"]') || scope
+      for (const other of group.querySelectorAll('[role="radio"]')) {
+        other.setAttribute('aria-checked', String(other === el))
+      }
+    })
+  }
+  for (const el of scope.querySelectorAll('[role="checkbox"], [role="switch"]')) {
+    el.addEventListener('click', () => {
+      el.setAttribute('aria-checked', String(el.getAttribute('aria-checked') !== 'true'))
+    })
+  }
+}
 
 describe('Google Forms', () => {
   it('finds a radio group made entirely of divs', () => {
@@ -236,5 +260,205 @@ describe('custom widgets', () => {
       </div>
     `)
     expect(only().constraints.is_required).toBe(true)
+  })
+})
+
+describe('multi-select', () => {
+  const APPLY = `
+    <div role="listitem">
+      <div id="q" role="heading">Which of these have you worked with?</div>
+      <div role="group" aria-labelledby="q">
+        <div role="checkbox" aria-checked="false" aria-label="Python"></div>
+        <div role="checkbox" aria-checked="false" aria-label="Rust"></div>
+        <div role="checkbox" aria-checked="false" aria-label="Go"></div>
+      </div>
+    </div>
+  `
+
+  it('asks a group of checkboxes as one question, not one each', () => {
+    // The bug this replaces: three questions called "Python", "Rust" and "Go",
+    // each of which the backend is asked to answer. The question is the heading;
+    // the box labels are the answers to it.
+    page(APPLY)
+    const field = only()
+    expect(field.multi).toBe(true)
+    expect(field.context_label).toBe('Which of these have you worked with?')
+    expect(field.options).toEqual(['Python', 'Rust', 'Go'])
+  })
+
+  it('keeps a lone checkbox as its own yes/no question', () => {
+    page(`
+      <div role="listitem">
+        <div role="heading">Consent</div>
+        <div role="checkbox" aria-label="I agree to the privacy policy"></div>
+      </div>
+    `)
+    expect(only().type).toBe('checkbox')
+    expect(only().multi).toBe(false)
+  })
+
+  it('ticks every option the answer names', async () => {
+    page(APPLY)
+    reactive()
+    const result = await fill(only().id, 'Python, Go', 'deterministic')
+    expect(result.ok).toBe(true)
+    expect(result.wrote).toBe('Python, Go')
+    const state = [...document.querySelectorAll('[role="checkbox"]')].map((el) =>
+      el.getAttribute('aria-checked')
+    )
+    expect(state).toEqual(['true', 'false', 'true'])
+  })
+
+  it('leaves the boxes the answer did not name alone rather than unticking them', async () => {
+    // An already-ticked box may be a choice the user made by hand. Clearing it
+    // because the generated answer forgot to mention it is worse than leaving one
+    // box too many.
+    page(APPLY)
+    document.querySelectorAll('[role="checkbox"]')[1].setAttribute('aria-checked', 'true')
+    reactive()
+    await fill(only().id, 'Python', 'deterministic')
+    expect(document.querySelectorAll('[role="checkbox"]')[1].getAttribute('aria-checked')).toBe(
+      'true'
+    )
+  })
+
+  it('names the parts of the answer that matched nothing', async () => {
+    page(APPLY)
+    reactive()
+    const result = await fill(only().id, 'Python and Haskell', 'deterministic')
+    expect(result.ok).toBe(true)
+    expect(result.wrote).toBe('Python')
+    expect(result.unmatched).toEqual(['Haskell'])
+  })
+
+  it('reports which boxes are already ticked', () => {
+    page(APPLY)
+    document.querySelectorAll('[role="checkbox"]')[0].setAttribute('aria-checked', 'true')
+    document.querySelectorAll('[role="checkbox"]')[2].setAttribute('aria-checked', 'true')
+    expect(only().current_value).toBe('Python, Go')
+  })
+})
+
+describe('clicking a choice', () => {
+  const TEAM = `
+    <div role="listitem">
+      <div id="q" role="heading">Which team are you applying to?</div>
+      <div role="radiogroup" aria-labelledby="q">
+        <div role="radio" aria-checked="false" aria-label="Engineering"></div>
+        <div role="radio" aria-checked="false" aria-label="Design"></div>
+      </div>
+    </div>
+  `
+
+  it('picks a div radio and reads the choice back', async () => {
+    page(TEAM)
+    reactive()
+    const result = await fill(only().id, 'Design', 'deterministic')
+    expect(result).toEqual({ ok: true, wrote: 'Design' })
+    expect(document.querySelectorAll('[role="radio"]')[1].getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('matches an answer to an option that spells it out', async () => {
+    page(`
+      <div role="listitem">
+        <div id="q" role="heading">Are you legally allowed to work in the UK?</div>
+        <div role="radiogroup" aria-labelledby="q">
+          <div role="radio" aria-checked="false" aria-label="Yes, I have the right to work"></div>
+          <div role="radio" aria-checked="false" aria-label="No, I would need sponsorship"></div>
+        </div>
+      </div>
+    `)
+    reactive()
+    const result = await fill(only().id, 'Yes', 'deterministic')
+    expect(result.wrote).toBe('Yes, I have the right to work')
+  })
+
+  it('refuses to guess when the answer matches no option', async () => {
+    // "No" is a substring of "Not sure", and picking that for an answer of No is
+    // the kind of wrong that nobody catches: the user reads "filled" and submits.
+    page(`
+      <div role="listitem">
+        <div id="q" role="heading">Preferred start date</div>
+        <div role="radiogroup" aria-labelledby="q">
+          <div role="radio" aria-checked="false" aria-label="Immediately"></div>
+          <div role="radio" aria-checked="false" aria-label="In one month"></div>
+        </div>
+      </div>
+    `)
+    reactive()
+    const result = await fill(only().id, 'Some time next year', 'deterministic')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/no option matching/)
+    expect(document.querySelectorAll('[role="radio"]')[0].getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('never clicks a radio the backend called an attestation', async () => {
+    // The whole point of the deny-list, at the only place it can still be enforced.
+    page(`
+      <div role="listitem">
+        <div id="q" role="heading">Do you require visa sponsorship?</div>
+        <div role="radiogroup" aria-labelledby="q">
+          <div role="radio" aria-checked="false" aria-label="Yes"></div>
+          <div role="radio" aria-checked="false" aria-label="No"></div>
+        </div>
+      </div>
+    `)
+    reactive()
+    const result = await fill(only().id, 'No', 'attestation')
+    expect(result.ok).toBe(false)
+    const state = [...document.querySelectorAll('[role="radio"]')].map((el) =>
+      el.getAttribute('aria-checked')
+    )
+    expect(state).toEqual(['false', 'false'])
+  })
+
+  it('says the click did not register rather than claiming an answer', async () => {
+    // No listener at all: the div is inert, so nothing changes. Reporting success
+    // here would tell the user a required question is answered when it is blank.
+    page(TEAM)
+    const result = await fill(only().id, 'Design', 'deterministic')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/did not take it/)
+  })
+
+  it('opens a searchable dropdown, waits for the menu, and clicks a choice', async () => {
+    page(`
+      <div class="field">
+        <label>Country of residence</label>
+        <div role="combobox" aria-controls="lb"><input type="text" /></div>
+        <div id="lb" role="listbox"></div>
+      </div>
+    `)
+    const input = document.querySelector('input')
+    const menu = document.querySelector('#lb')
+    // react-select renders no options until it is opened, and then a tick later.
+    input.addEventListener('click', () => {
+      setTimeout(() => {
+        menu.innerHTML = `<div role="option">India</div><div role="option">Germany</div>`
+        for (const option of menu.querySelectorAll('[role="option"]')) {
+          option.addEventListener('click', () => {
+            input.value = option.textContent
+            menu.innerHTML = ''
+          })
+        }
+      }, 60)
+    })
+
+    const result = await fill(only().id, 'Germany', 'deterministic')
+    expect(result).toEqual({ ok: true, wrote: 'Germany' })
+    expect(input.value).toBe('Germany')
+  })
+
+  it('says so when the dropdown will not open', async () => {
+    page(`
+      <div class="field">
+        <label>Country of residence</label>
+        <div role="combobox" aria-controls="lb"><input type="text" /></div>
+        <div id="lb" role="listbox"></div>
+      </div>
+    `)
+    const result = await fill(only().id, 'Germany', 'deterministic')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/would not open/)
   })
 })

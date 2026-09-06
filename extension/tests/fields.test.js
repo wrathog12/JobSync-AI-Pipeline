@@ -125,21 +125,21 @@ describe('constraints', () => {
 })
 
 describe('writing', () => {
-  it('refuses an attestation field outright', () => {
+  it('refuses an attestation field outright', async () => {
     // The refusal that matters. The backend already declined to generate this,
     // but the write happens in the page, so this is the last place that can say
     // no — and the only one that actually stops it.
     page(`<label for="a">Do you require sponsorship?</label><input id="a" />`)
     const field = only()
 
-    const result = fill(field.id, 'No', 'attestation')
+    const result = await fill(field.id, 'No', 'attestation')
 
     expect(result.ok).toBe(false)
     expect(result.reason).toMatch(/attestation/)
     expect(document.querySelector('#a').value).toBe('')
   })
 
-  it('writes through the prototype setter so React notices', () => {
+  it('writes through the prototype setter so React notices', async () => {
     // Assigning `el.value` shadows React's own setter: the pixels update, React's
     // state does not, and the next render restores the old value while validation
     // still calls the field empty. A real keystroke produces a bubbling `input`,
@@ -150,7 +150,7 @@ describe('writing', () => {
     el.addEventListener('input', (e) => seen.push(['input', e.bubbles]))
     el.addEventListener('change', (e) => seen.push(['change', e.bubbles]))
 
-    const result = fill(only().id, 'I shipped the thing.', 'generative')
+    const result = await fill(only().id, 'I shipped the thing.', 'generative')
 
     expect(result).toEqual({ ok: true, wrote: 'I shipped the thing.' })
     expect(seen).toEqual([
@@ -159,51 +159,67 @@ describe('writing', () => {
     ])
   })
 
-  it('reports what the field kept, not what we sent', () => {
+  it('reports what the field kept, not what we sent', async () => {
     // A maxlength the page enforces truncates silently. The user should learn
     // that from the popup, not from a rejected application.
     page(`<label for="a">Why us?</label><input id="a" maxlength="10" />`)
-    const result = fill(only().id, 'far too long to fit', 'generative')
+    const result = await fill(only().id, 'far too long to fit', 'generative')
     expect(result.ok).toBe(true)
     expect(result.wrote).toBe('far too lo')
   })
 
-  it('matches a select option by its visible text', () => {
+  it('matches a select option by its visible text', async () => {
     page(`
       <label for="a">Years of experience</label>
       <select id="a"><option>0-2</option><option>3-5</option><option>6+</option></select>
     `)
-    expect(fill(only().id, '3-5', 'deterministic')).toEqual({ ok: true, wrote: '3-5' })
+    expect(await fill(only().id, '3-5', 'deterministic')).toEqual({ ok: true, wrote: '3-5' })
     expect(document.querySelector('#a').value).toBe('3-5')
   })
 
-  it('says so rather than guessing when no option matches', () => {
+  it('says so rather than guessing when no option matches', async () => {
     page(`
       <label for="a">Years of experience</label>
       <select id="a"><option>0-2</option><option>3-5</option></select>
     `)
-    const result = fill(only().id, 'about seven', 'deterministic')
+    const result = await fill(only().id, 'about seven', 'deterministic')
     expect(result.ok).toBe(false)
     expect(result.reason).toMatch(/no option matching/)
   })
 
-  it('leaves checkboxes to the user', () => {
-    page(`<label for="a">I certify the above is true</label><input id="a" type="checkbox" />`)
-    const result = fill(only().id, 'true', 'generative')
+  it('ticks a lone checkbox on a yes and reports it', async () => {
+    page(`<label for="a">Are you happy to work on site?</label><input id="a" type="checkbox" />`)
+    const result = await fill(only().id, 'Yes', 'deterministic')
+    expect(result.ok).toBe(true)
+    expect(document.querySelector('#a').checked).toBe(true)
+  })
+
+  it('refuses a checkbox when the answer is not a yes or a no', async () => {
+    // A tick is a claim. "It depends" is not a tick, and guessing which way it
+    // leans puts a statement on the form the user never made.
+    page(`<label for="a">Are you happy to work on site?</label><input id="a" type="checkbox" />`)
+    const result = await fill(only().id, 'Depends on the team', 'generative')
     expect(result.ok).toBe(false)
     expect(document.querySelector('#a').checked).toBe(false)
   })
 
-  it('fails clearly when the page has changed under it', () => {
+  it('never ticks a checkbox the backend called an attestation', async () => {
+    page(`<label for="a">I certify the above is true</label><input id="a" type="checkbox" />`)
+    const result = await fill(only().id, 'Yes', 'attestation')
+    expect(result.ok).toBe(false)
+    expect(document.querySelector('#a').checked).toBe(false)
+  })
+
+  it('fails clearly when the page has changed under it', async () => {
     page(`<label for="a">Cover letter</label><textarea id="a"></textarea>`)
     const field = only()
     document.body.innerHTML = ''
-    expect(fill(field.id, 'text', 'generative')).toMatchObject({ ok: false })
+    expect(await fill(field.id, 'text', 'generative')).toMatchObject({ ok: false })
   })
 
-  it('refuses an empty answer instead of clearing the field', () => {
+  it('refuses an empty answer instead of clearing the field', async () => {
     page(`<label for="a">Cover letter</label><textarea id="a">what I typed</textarea>`)
-    const result = fill(only().id, '', 'generative')
+    const result = await fill(only().id, '', 'generative')
     expect(result.ok).toBe(false)
     expect(document.querySelector('#a').value).toBe('what I typed')
   })
