@@ -17,7 +17,7 @@ declines rather than invents when it can't.
 3. Anything it read wrong you fix by hand, on the same page, at any time.
 4. On a job application, you click the extension. It reads the job description
    off the page, reads the form, works out what each field is asking, and answers
-   from your memory.
+   from your memory.l...
 5. **Nothing is written to the page until you click fill on that field.**
    Generating and filling are two separate actions on purpose.
 
