@@ -9,7 +9,7 @@ declines rather than invents when it can't.
 
 ---
 
-## What it does today
+## What it does Tomorrow
 
 1. You upload your CV and project documents once, on the profile page.
 2. You review what it extracted and confirm it, item by item. Nothing enters
