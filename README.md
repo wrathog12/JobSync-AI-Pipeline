@@ -4,7 +4,7 @@ A Chrome extension that fills in job application forms from your own confirmed
 history — and refuses to answer the questions it has no business answering.
 
 The point is not speed. Any autofill tool is fast. The point is that every
-sentence it writes can be traced back to something you actually did, and that it
+sentence it writes can be traced back to something you actually did, and that it...
 declines rather than invents when it can't.
 
 ---
